@@ -363,11 +363,11 @@ class PointNavigationTask(BaseTask):
 
         # Add additional info
         info["path_length"] = self._path_length
-        info["spl"] = (
-            float(info["success"]) * min(1.0, self._geodesic_dist / self._path_length)
-            if done and self._path_length != 0.0
-            else 0.0
-        )
+        # info["spl"] = (
+        #     float(info["success"]) * min(1.0, self._geodesic_dist / self._path_length)
+        #     if done and self._path_length != 0.0
+        #     else 0.0
+        # )
 
         return done, info
 

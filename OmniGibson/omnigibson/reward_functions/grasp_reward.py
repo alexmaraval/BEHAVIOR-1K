@@ -42,7 +42,7 @@ class GraspReward(BaseRewardFunction):
         # Store internal vars
         self.prev_grasping = False
         self.prev_eef_pos = None
-        self.prev_eef_rot = None
+        self.prev_eef_quat = None
         self.obj_name = obj_name
         self.obj = None
         self.dist_coeff = dist_coeff
@@ -155,4 +155,4 @@ class GraspReward(BaseRewardFunction):
         super().reset(task, env)
         self.prev_grasping = False
         self.prev_eef_pos = None
-        self.prev_eef_rot = None
+        self.prev_eef_quat = None

@@ -23,8 +23,10 @@ class RGBLowResWrapper(EnvironmentWrapper):
             sensor_name = camera_name.split("::")[1]
             if camera_id == "head":
                 robot.sensors[sensor_name].horizontal_aperture = 40.0  # this is what we used in data collection
-            robot.sensors[sensor_name].image_height = 224
-            robot.sensors[sensor_name].image_width = 224
+            # robot.sensors[sensor_name].image_height = 224
+            # robot.sensors[sensor_name].image_width = 224
+            robot.sensors[sensor_name].image_height = 256
+            robot.sensors[sensor_name].image_width = 256
         # reload observation space
         env.load_observation_space()
         logger.info("Reloaded observation space!")
