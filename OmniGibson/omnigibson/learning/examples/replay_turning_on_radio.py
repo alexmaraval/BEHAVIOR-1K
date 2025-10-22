@@ -79,10 +79,10 @@ def make_radio_on(prev_reward, env):
 
 def get_sub_stages_factory():
     stages = [
-        {"name": "move_to_radio", "kind": "task", "obj": make_move_to_radio},
-        {"name": "pick_radio", "kind": "task", "obj": make_grasp_radio},
-        {"name": "radio_on", "kind": "task", "obj": make_radio_on},
-        # {"name": "place_radio", "kind": "task", "obj": place_radio},
+        {"name": "move_to_radio", "kind": "task", "factory": make_move_to_radio},
+        {"name": "pick_radio", "kind": "task", "factory": make_grasp_radio},
+        {"name": "radio_on", "kind": "task", "factory": make_radio_on},
+        # {"name": "place_radio", "kind": "task", "factory": place_radio},
     ]
     return stages
 
