@@ -77,6 +77,15 @@ def make_radio_on(prev_reward, env):
     )
     return task
 
+def get_sub_stages_factory():
+    stages = [
+        {"name": "move_to_radio", "kind": "task", "obj": make_move_to_radio},
+        {"name": "pick_radio", "kind": "task", "obj": make_grasp_radio},
+        {"name": "radio_on", "kind": "task", "obj": make_radio_on},
+        # {"name": "place_radio", "kind": "task", "obj": place_radio},
+    ]
+    return stages
+
 console = Console()
 
 
@@ -89,12 +98,7 @@ def run_episode(parquet, env, instance_id, task_name):
 
 
     # Stage list with either subtask objects or predicate callables
-    stages = [
-        {"name": "move_to_radio", "kind": "task", "obj": make_move_to_radio},
-        {"name": "pick_radio", "kind": "task", "obj": make_grasp_radio},
-        {"name": "radio_on", "kind": "task", "obj": make_radio_on},
-        # {"name": "place_radio", "kind": "task", "obj": place_radio},
-    ]
+    stages = get_sub_stages_factory()
 
     stage_states = [{"name": s["name"], "reward": 0.0, "status": "pending"} for s in stages]
 
@@ -125,7 +129,7 @@ def run_episode(parquet, env, instance_id, task_name):
 
             stage = stages[stage_i]
             if sub_task is None:
-                sub_task = stage["obj"](prev_reward, env)
+                sub_task = stage["factory"](prev_reward, env)
 
             rew_s, done_s, info_s = sub_task.step(env=env, action=action)
 
@@ -170,88 +174,6 @@ def run_episode(parquet, env, instance_id, task_name):
     return step_rewards, step_success
 
 
-
-# def run_episode(parquet, env, instance_id):
-#
-#     obs, _ = env.reset()
-#     load_task_instance(env, instance_id)
-#
-#     df = pd.read_parquet(parquet)
-
-#
-#     # Stage list with either subtask objects
-#     stages = [
-#         {"name": "move_to_radio", "kind": "task", "obj": make_move_to_radio},
-#         {"name": "pick_radio", "kind": "task", "obj": make_grasp_radio},
-#         {"name": "radio_on", "kind": "task", "obj": make_radio_on},
-#         # {"name": "place_radio", "kind": "task", "obj": place_radio},
-#     ]
-#
-#     stage_states = [{"completed": False} for _ in stages]
-#
-#     stage_i = 0
-#     step_rewards = []
-#     step_success = []
-#     for i, row in df.iterrows():
-#         base_pos = obs["robot_r1"]["proprio"][140:142]
-#         yaw2d = obs["robot_r1"]["proprio"][149]
-#         action = get_transformed_action(row, base_pos, yaw2d)
-#         action = th.from_numpy(action)
-#         obs, reward, terminated, truncated, info = env.step(action)
-#         env_done = bool(terminated or truncated)
-#
-#         # Evaluate current stage
-#         completed = False
-#         dense_rew = 0.0
-#         if stage_i < len(stages):
-#             s = stages[stage_i]
-#             if s["kind"] == "task":
-#
-#                 rew_s, done_s, info_s = s["obj"].step(env=env, action=action)
-#                 dense_rew = float(rew_s)
-#
-#                 completed = bool(info_s.get("done", {}).get("success", False)) if isinstance(info_s, dict) else False
-#             else:
-#                 # Predicate-based stage
-#                 pred_ok = bool(s["pred"](env))
-#                 if pred_ok and s.get("state") is not None:
-#                     completed = True
-#                 else:
-#                     if s.get("state") is not None and s["state"].get("enter_step") is None:
-#                         s["state"]["enter_step"] = int(env.episode_steps)
-#                     completed = pred_ok
-#
-#         step_rewards.append(dense_rew)
-#         step_success.append(1 if completed else 0)
-#
-#         # Update cumulative completion flags up to current stage
-#         for idx in range(stage_i):
-#             stage_states[idx]["completed"] = True
-#
-#         render_now = env_done or completed or (i % 25 == 0) or i == 0
-#         if render_now:
-#             print()  # spacer
-#             header = f"{'Idx':<3} {'Stage':<28} {'Status':<8} {'Reward':>8}"
-#             print(header)
-#             print("-" * len(header))
-#             for idx, st in enumerate(stages):
-#                 status = 'done' if stage_states[idx]["completed"] else ('active' if idx == stage_i else 'pending')
-#                 if stage_states[idx]["completed"]:
-#                     r_str = "1.000"
-#                 elif idx == stage_i:
-#                     r_str = "1.000" if completed else "0.000"
-#                 else:
-#                     r_str = ""
-#                 print(f"{idx:<3} {st['name']:<28} {status:<8} {r_str:>8}")
-#         if env_done or stage_i >= len(stages):
-#             print()  # newline after final update
-#             print("episode end. task_success=", info.get("done", {}).get("success", False))
-#             break
-#
-#         if completed:
-#             stage_i += 1
-#
-#     return step_rewards, step_success
 
 
 def main():
