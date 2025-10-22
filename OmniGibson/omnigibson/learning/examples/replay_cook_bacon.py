@@ -1,7 +1,7 @@
 import argparse
 import json as pyjson
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pandas as pd
 import torch as th
@@ -12,10 +12,8 @@ sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
 
 import omnigibson as og
 from omnigibson.macros import gm
-from omnigibson.object_states import Pose
-from omnigibson.tasks.point_reaching_task import PointReachingTask
 
-from env_utils import build_env, load_task_instance, get_transformed_action, make_table, setup_task, task_setup
+from env_utils import build_env, load_task_instance, get_transformed_action, make_table, task_setup
 
 from omnigibson.tasks.custom_tasks import (
     MoveBaseToObjectTask,
@@ -26,10 +24,7 @@ from omnigibson.tasks.custom_tasks import (
     RobustGraspTask,
     SufficientlyOpenTask,
     SufficientlyClosedTask,
-    InsideTask,
     OnTopStableTask,
-    _get_named,
-    _front_target,
 )
 
 gm.ENABLE_FLATCACHE = True
@@ -51,11 +46,11 @@ name_bacon_6 = "bacon_214"
 
 @task_setup(goal_type="nav", target=name_fridge, front_offset=0.3)
 def make_move_to_fridge(prev_reward, env):
-    reward_config = {
-        "r_offset": prev_reward or 0.0,
-        "use_normalized_potential": True,
-        "r_potential": 1.0,
-    }
+    # reward_config = {
+    #     "r_offset": prev_reward or 0.0,
+    #     "use_normalized_potential": True,
+    #     "r_potential": 1.0,
+    # }
     return MoveBaseToObjectTask(
         target_object_name=name_fridge,
         goal_tolerance=1,
@@ -103,6 +98,7 @@ def make_move_to_counter_top(prev_reward, env):
         termination_config={"max_steps": 10000},
         include_obs=False,
     )
+
 
 @task_setup(goal_type=None, target=name_tray, source=name_burner)
 def make_place_next_to_burner(prev_reward, env):
@@ -213,6 +209,24 @@ def make_grasp_pan(prev_reward, env):
     )
     return task
 
+def get_sub_stages_factory():
+    stages = [
+        {"name": "move_to_fridge", "kind": "task", "factory": make_move_to_fridge},
+        {"name": "open_fridge", "kind": "task", "factory": make_open_fridge},
+        {"name": "pick_tray", "kind": "task", "factory": make_grasp_tray},
+        {"name": "close_fridge", "kind": "task", "factory": make_close_fridge},
+        {"name": "move_to_counter_top", "kind": "task", "factory": make_move_to_counter_top},
+        {"name": "place_on_next_to_burner1", "kind": "task", "factory": make_place_next_to_burner},
+        {"name": "Move_to_frying_pan", "kind": "task", "factory": make_move_to_frying_pan},
+        {"name": "pick_up_frying_pan", "kind": "task", "factory": make_grasp_pan},
+        {"name": "place_frying_pan", "kind": "task", "factory": make_place_frying_pan},
+        {"name": "move_to_tray", "kind": "task", "factory": make_move_to_tray},
+        {"name": "pick_up_tray", "kind": "task", "factory": make_grasp_tray},
+        {"name": "pour_tray", "kind": "task", "factory": make_pour_tray},
+        {"name": "place_on_next_to_burner2", "kind": "task", "factory": make_place_next_to_burner},
+        {"name": "burner_on_switch", "kind": "task", "factory": make_burner_on},
+    ]
+    return stages
 
 console = Console()
 
@@ -230,22 +244,7 @@ def main():
     df = pd.read_parquet(args.parquet)
 
     # Stage list with either subtask objects or predicate callables
-    stages = [
-        {"name": "move_to_fridge", "kind": "task", "obj": make_move_to_fridge},
-        {"name": "open_fridge", "kind": "task", "obj": make_open_fridge},
-        {"name": "pick_tray", "kind": "task", "obj": make_grasp_tray},
-        {"name": "close_fridge", "kind": "task", "obj": make_close_fridge},
-        {"name": "move_to_counter_top", "kind": "task", "obj": make_move_to_counter_top},
-        {"name": "place_on_next_to_burner1", "kind": "task", "obj": make_place_next_to_burner},
-        {"name": "Move_to_frying_pan", "kind": "task", "obj": make_move_to_frying_pan},
-        {"name": "pick_up_frying_pan", "kind": "task", "obj": make_grasp_pan},
-        {"name": "place_frying_pan", "kind": "task", "obj": make_place_frying_pan},
-        {"name": "move_to_tray", "kind": "task", "obj": make_move_to_tray},
-        {"name": "pick_up_tray", "kind": "task", "obj": make_grasp_tray},
-        {"name": "pour_tray", "kind": "task", "obj": make_pour_tray},
-        {"name": "place_on_next_to_burner2", "kind": "task", "obj": make_place_next_to_burner},
-        {"name": "burner_on_switch", "kind": "task", "obj": make_burner_on},
-    ]
+    stages = get_sub_stages_factory()
 
     stage_states = [{"name": s["name"], "reward": 0.0, "status": "pending"} for s in stages]
 
@@ -272,7 +271,7 @@ def main():
 
             stage = stages[stage_i]
             if sub_task is None:
-                sub_task = stage["obj"](prev_reward, env)
+                sub_task = stage["factory"](prev_reward, env)
 
             rew_s, done_s, info_s = sub_task.step(env=env, action=action)
 
@@ -312,6 +311,7 @@ def main():
 
     env.close()
     og.shutdown()
+
 
 if __name__ == "__main__":
     main()
