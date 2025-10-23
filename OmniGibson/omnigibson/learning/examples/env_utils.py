@@ -147,8 +147,6 @@ def build_env(activity_definition_id: int, instance_id: int, activity_name: str,
             }
         ],
     }
-
-    # cfg = get_max_steps(task_name=activity_name)
     env = og.Environment(configs=cfg)
     env = EnvironmentWrapper(env=env)
 
