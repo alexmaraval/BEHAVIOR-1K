@@ -18,6 +18,13 @@ from omnigibson.utils.python_utils import recursively_convert_to_torch
 from omnigibson.tasks.custom_tasks import _get_named, _front_target
 from omnigibson.object_states import Pose
 from omnigibson.tasks.point_reaching_task import PointReachingTask
+from omnigibson.learning.utils.eval_utils import (TASK_NAMES_TO_INDICES, generate_basic_environment_config)
+from gello.robots.sim_robot.og_teleop_utils import (
+    augment_rooms,
+    load_available_tasks,
+    generate_robot_config,
+    get_task_relevant_room_types,
+)
 
 from rich.table import Table
 
@@ -38,6 +45,57 @@ def build_transform(theta, pos_xy, z=0.0):
         [0, 0, 0, 1]
     ])
 
+def get_max_steps(task_name):
+    human_stats = {
+        "length": [],
+        "distance_traveled": [],
+        "left_eef_displacement": [],
+        "right_eef_displacement": [],
+    }
+    with open(os.path.join(gm.DATA_PATH, "2025-challenge-task-instances", "metadata", "episodes.jsonl"), "r") as f:
+        episodes = [json.loads(line) for line in f]
+
+    task_idx = TASK_NAMES_TO_INDICES[task_name]
+
+    for episode in episodes:
+        if episode["episode_index"] // 1e4 == task_idx:
+            for k in human_stats.keys():
+                human_stats[k].append(episode[k])
+    # take a mean
+    for k in human_stats.keys():
+        human_stats[k] = sum(human_stats[k]) / len(human_stats[k])
+
+    # Load the seed instance by default
+    available_tasks = load_available_tasks()
+    task_cfg = available_tasks[task_name][0]
+    robot_type = "R1Pro" #cfg.robot.type TODO
+    cfg = generate_basic_environment_config(task_name=task_name, task_cfg=task_cfg)
+    # breakpoint()
+    # if cfg["partial_scene_load"]:
+    relevant_rooms = get_task_relevant_room_types(activity_name=task_name)
+    relevant_rooms = augment_rooms(relevant_rooms, task_cfg["scene_model"], task_name)
+    cfg["scene"]["load_room_types"] = relevant_rooms
+
+    cfg["robots"] = [
+        generate_robot_config(
+            task_name=task_name,
+            task_cfg=task_cfg,
+        )
+    ]
+    # Update observation modalities
+    cfg["robots"][0]["obs_modalities"] = ["proprio"]
+    cfg["robots"][0]["proprio_obs"] = list(PROPRIOCEPTION_INDICES["R1Pro"].keys())
+    # if cfg.robot.controllers is not None:
+    #     cfg["robots"][0]["controller_config"].update(cfg.robot.controllers)
+    # if cfg.max_steps is None:
+    #     cfg["task"]["termination_config"]["max_steps"] = int(human_stats["length"] * 2)
+    # else:
+    #     cfg["task"]["termination_config"]["max_steps"] = cfg.max_steps
+
+    cfg["task"]["termination_config"]["max_steps"] = int(human_stats["length"] * 2)
+
+    return cfg
+
 
 def build_env(activity_definition_id: int, instance_id: int, activity_name: str, scene: str = "house_single_floor"):
     cfg = {
@@ -49,7 +107,7 @@ def build_env(activity_definition_id: int, instance_id: int, activity_name: str,
             "activity_definition_id": int(activity_definition_id),
             "activity_instance_id": int(instance_id),
             "online_object_sampling": False,
-            "termination_config": {"max_steps": 10000},
+            "termination_config": {"max_steps": 100000},
             "include_obs": False,
         },
         "robots": [
@@ -89,6 +147,8 @@ def build_env(activity_definition_id: int, instance_id: int, activity_name: str,
             }
         ],
     }
+
+    # cfg = get_max_steps(task_name=activity_name)
     env = og.Environment(configs=cfg)
     env = EnvironmentWrapper(env=env)
 
@@ -113,6 +173,8 @@ def load_task_instance(env, instance_id):
         get_task_instance_path(scene_model),
         f"json/{scene_model}_task_{env.task.activity_name}_instances/{tro_filename}-tro_state.json",
     )
+    # TODO temp  patch
+    # tro_file_path =  "/home/jiacheng/Documents/combined_scene.json"
     with open(tro_file_path, "r") as f:
         tro_state = recursively_convert_to_torch(json.load(f))
     for tro_key, tro_state in tro_state.items():
@@ -183,8 +245,8 @@ def task_setup(goal_type=None, target=None, **setup_kwargs):
     """
 
     def decorator(factory):
-        def wrapper(prev_reward, env):
-            task = factory(prev_reward, env)
+        def wrapper(max_steps, env):
+            task = factory(max_steps, env)
             return setup_task(task, env, goal_type=goal_type, target_name=target, **setup_kwargs)
 
         return wrapper

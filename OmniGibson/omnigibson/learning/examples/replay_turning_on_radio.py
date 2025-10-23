@@ -45,20 +45,20 @@ name_radio = "radio_89"
 name_coffe_table = "coffee_table_koagbh_0"
 
 @task_setup(goal_type="nav", target=name_radio, front_offset=0)
-def make_move_to_radio(prev_reward, env):
+def make_move_to_radio(max_steps, env):
     return MoveBaseToObjectTask(
         target_object_name=name_radio,
         goal_tolerance=1.3,
-        termination_config={"max_steps": 10000},
+        termination_config={"max_steps": max_steps},
         include_obs=False,
     )
 
 @task_setup(goal_type=None, target=name_radio)
-def make_grasp_radio(prev_reward, env):
+def make_grasp_radio(max_steps, env):
     reward_config = {"collision_penalty": 0.000000001}
     task = RobustGraspTask(
         obj_name=name_radio,
-        termination_config={"max_steps": 10000},
+        termination_config={"max_steps": max_steps},
         reward_config=reward_config,
         include_obs=False,
         objects_config=[],
@@ -67,12 +67,12 @@ def make_grasp_radio(prev_reward, env):
 
 
 @task_setup(goal_type=None, target=name_radio)
-def make_radio_on(prev_reward, env):
-    reward_config = {"r_offset": prev_reward or 0.0}
+def make_radio_on(max_steps, env):
+    # reward_config = {"r_offset": prev_reward or 0.0}
     task = OnTask(
         target_object_name=name_radio,
         # reward_config=reward_config,
-        termination_config={"max_steps": 10000},
+        termination_config={"max_steps": max_steps},
         include_obs=False,
     )
     return task
@@ -129,11 +129,12 @@ def run_episode(parquet, env, instance_id, task_name):
 
             stage = stages[stage_i]
             if sub_task is None:
-                sub_task = stage["factory"](prev_reward, env)
+                sub_task = stage["factory"](max_steps=10, env=env)
 
             rew_s, done_s, info_s = sub_task.step(env=env, action=action)
 
-            completed = bool(info_s.get("done", {}).get("success", False)) if isinstance(info_s, dict) else False
+            completed = info_s.get("done", {}).get("success", False)
+            truncated_s = False if completed else True
 
             current_reward = float(rew_s)
             stage_states[stage_i]["reward"] = current_reward
@@ -145,8 +146,8 @@ def run_episode(parquet, env, instance_id, task_name):
             step_rewards.append(current_reward)
             step_success.append(1 if completed else 0)
 
-            if completed:
-                stage_states[stage_i]["status"] = "completed"
+            if done_s.item():
+                stage_states[stage_i]["status"] = "completed" if completed else "truncated"
                 sub_task_status[stage_i] = True
                 # prev_reward = current_reward + 0.1
 
@@ -191,8 +192,8 @@ def main():
     for f in pgb_episode:
         pgb_episode.set_description(f"{f}")
         # print(f)
-        # if f != "episode_00000050.parquet":
-        #     continue
+        if f != "episode_00000030.parquet":
+            continue
         episode_index = Path(f)
         instance_id = int(episode_index.stem.split("_")[-1])
         instance_id = int((instance_id // 10) % 1e3)
@@ -208,7 +209,7 @@ def main():
         all_rewards.append(metrics)
         with open(out_dir / "metrics_21_10.jsonl", "a", encoding="utf-8") as fjsonl:
                 fjsonl.write(json.dumps(metrics) + "\n")
-        # break
+        break
         # if i>3:
         #     break
         # else:
