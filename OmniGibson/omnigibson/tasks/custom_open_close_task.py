@@ -295,9 +295,6 @@ class SufficientlyOpenTask(BaseTask):
         done_out = any(d.get("done", False) for d in tc.values())
         return float(dense), done_out, info
 
-    @classproperty
-    def valid_scene_types(cls):
-        return {TraversableScene}
 
     @classproperty
     def default_reward_config(cls):

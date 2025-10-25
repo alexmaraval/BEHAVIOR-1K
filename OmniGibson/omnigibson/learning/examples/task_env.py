@@ -1,8 +1,9 @@
 import json
 import os
 import sys
-from typing import Dict, List, Any
+from pathlib import Path
 
+import hydra
 import pandas as pd
 import torch as th
 
@@ -23,6 +24,8 @@ from gello.robots.sim_robot.og_teleop_utils import (
 from omnigibson.utils.asset_utils import get_task_instance_path
 from omnigibson.utils.python_utils import recursively_convert_to_torch
 from task_factory import get_sub_tasks
+from inspect import getsourcefile
+from omnigibson.robots import BaseRobot
 
 gm.ENABLE_FLATCACHE = True
 gm.USE_GPU_DYNAMICS = False
@@ -30,26 +33,60 @@ gm.ENABLE_TRANSITION_RULES = True
 
 
 class TaskCombination:
+    """
+    Managing and executing a sequence of subtasks in combination.
+    """
 
-    def __init__(self, tasks: list, bonus_completed_subtask: float = 10.0, sparse_early_subgoals: bool = False) -> None:
+    def __init__(
+            self, tasks: list, bonus_completed_subtask: float = 10.0, sparse_early_sub_goals: bool = False
+    ) -> None:
+        """
+        Initialize the TaskCombination with a sequence of subtasks.
+        Args:
+            tasks: List of task instances to be executed sequentially. Each must implement
+            `reset(env)` and `step(env, action)` methods.
+            bonus_completed_subtask: Reward bonus given after completing each subtask.
+            sparse_early_sub_goals: If True, suppresses dense rewards.
+        """
         self.tasks = tasks
         self.current_index = 0
         self.bonus_completed_subtask = bonus_completed_subtask
-        self.sparse_early_subgoals = sparse_early_subgoals
+        self.sparse_early_sub_goals = sparse_early_sub_goals
 
-    def reset(self, env):
+    def reset(self, env) -> None:
+        """
+        Reset all subtasks and start from the first one.
+        Args:
+            env: The environment instance to which all subtasks belong.
+
+        Returns:
+            None
+        """
         self.current_index = 0
         for task in self.tasks:
             task.reset(env)
 
-    def step(self, env, action):
+    def step(self, env, action) -> tuple[float, bool, dict]:
+        """
+        Perform one step in the current active subtask.
+        Args:
+            env: The environment in which the tasks operate.
+            action: The action to perform, passed directly to the current subtask's `step` method.
+
+        Returns:
+            reward : The reward from the current subtask, possibly modified by `sparse_early_sub_goals`
+            or replaced by `bonus_completed_subtask` upon completion.
+            done : True if all subtasks have been completed, False otherwise.
+            info : Additional information dictionary, typically propagated from the active subtask.
+
+        """
         if self.current_index >= len(self.tasks):
             return 0.0, True, {"done": {"success": True}}
 
         reward, done, info = self.tasks[self.current_index].step(env, action)
 
         # Sparse early subtasks if requested
-        if self.sparse_early_subgoals and (self.current_index < len(self.tasks) - 1):
+        if self.sparse_early_sub_goals and (self.current_index < len(self.tasks) - 1):
             reward = 0.0
 
         if done:
@@ -60,22 +97,41 @@ class TaskCombination:
 
 
 class TaskEnv:
+    """
+    A wrapper environment for managing a multi-stage robotic task composed of multiple subtasks.
+    """
 
     def __init__(
             self,
-            task_name: str,
+            config: dict[str, ...],
             motor_type: str = "position",
+            instance_id: int | None = None,
             max_steps: int | None = None,
-            instance_id: int = 1,
             use_domain_randomization: bool = False,
-            subtask_max_steps=10000
     ) -> None:
-        self.task_name = task_name
+        """
+        Initialize the TaskEnv environment and load all required components.
+        Args:
+            config: Configuration dictionary containing a key `'config'` with environment parameters.
+            motor_type: Robot control mode, e.g., `"position"` or `"velocity"`. Default is `"position"`.
+            instance_id: Scene instanceID of a specific task instance to load.
+            max_steps: Maximum number of simulation steps before termination.
+            use_domain_randomization: Whether to apply domain randomization. Default is False.
+        """
+        self.cfg = config.get("config")
+        assert self.cfg is not None, "You must pass the main config object under the 'config' key in config."
+        self.task_name = self.cfg.task.name
         self.motor_type = motor_type
         self.max_steps = max_steps
         self.instance_id = instance_id
-        self.subtask_max_steps = subtask_max_steps
         self.use_domain_randomization = use_domain_randomization
+
+        # Set up headless mode and video path from config
+        gm.HEADLESS = self.cfg.headless
+        if self.cfg.write_video:
+            self.video_path = Path(self.cfg.log_path).expanduser() / "videos"
+            self.video_path.mkdir(parents=True, exist_ok=True)
+            self._video_writer = None
 
         self.subtasks = []
         self._task_stages = None
@@ -92,7 +148,12 @@ class TaskEnv:
         self.set_subtasks()
         self.reset()
 
-    def _prepare_config(self):
+    def _prepare_config(self) -> dict[str, ...]:
+        """
+        Prepare the simulator configuration for the given task.
+        Returns:
+            A finalized configuration dictionary ready for initializing the simulation environment.
+        """
         human_stats = {
             "length": [],
             "distance_traveled": [],
@@ -135,9 +196,11 @@ class TaskEnv:
         cfg["robots"][0]["proprio_obs"] = list(PROPRIOCEPTION_INDICES["R1Pro"].keys())
         cfg["task"]["termination_config"]["max_steps"] = int(human_stats["length"] * 2)
 
-        # Override env-level frequencies if requested (kept for completeness)
+        # Override env-level frequencies if requested
         if self.max_steps is not None:
             cfg["task"]["termination_config"]["max_steps"] = self.max_steps
+        else:
+            self.max_steps = cfg["task"]["termination_config"]["max_steps"]
         if self.motor_type == "position":
             base = {"name": "HolonomicBaseJointController", "motor_type": "position", "pos_kp": 50,
                     "command_input_limits": None,
@@ -147,17 +210,22 @@ class TaskEnv:
 
         return cfg
 
-    def load_env(self):
+    def load_env(self) -> EnvironmentWrapper:
+        """
+        Load and initialize the simulation environment.
+        Returns:
+            A wrapped simulation environment ready for interaction.
+        """
         cfg = self._prepare_config()
         _env = og.Environment(configs=cfg)
         _env = EnvironmentWrapper(env=_env)
         return _env
 
-    def load_robot(self):
+    def load_robot(self) -> BaseRobot:
         """
-        Loads and returns the robot instance from the environment.
+        Retrieve the robot instance from the simulation environment.
         Returns:
-            BaseRobot: The robot instance loaded from the environment.
+            The robot object registered under `"robot_r1"` in the scene.
         """
         robot = self.env.scene.object_registry("name", "robot_r1")
         return robot
@@ -165,9 +233,8 @@ class TaskEnv:
     def load_task_instance(self) -> None:
         """
         Loads the configuration for a specific task instance.
-
-        Args:
-            instance_id (int): The ID of the task instance to load.
+        Returns:
+            None
         """
         scene_model = self._env.task.scene_name
         tro_filename = self._env.task.get_cached_activity_scene_filename(
@@ -207,40 +274,46 @@ class TaskEnv:
 
     @property
     def env(self) -> EnvironmentWrapper:
+        """Return the underlying wrapped simulation environment."""
         return self._env
 
     @property
     def stage_index(self) -> int:
+        """Return the index of the currently active subtask."""
         return self._stage_idx
 
     @property
     def num_stages(self) -> int:
+        """Return the total number of subtasks in the current task."""
         return len(self.subtasks)
 
     @property
     def done(self) -> bool:
+        """Return whether all subtasks in the task have been completed."""
         return self._completed
 
     def set_subtasks(self) -> None:
         """
-        Set sub-task factories.
-        Each item should be a dict: {"name": str, "factory": callable}
-        The factory must accept (max_steps: int, env: EnvironmentWrapper) and return a Task instance.
+        Initialize and configure all subtasks for the current task.
+        Returns:
+            None
         """
-        self._task_stages = get_sub_tasks(task_name=task)
+        self._task_stages = get_sub_tasks(task_name=self.task_name)
         self.subtasks = []
         for sub_task_map in (self._task_stages or []):
             sub_task = sub_task_map.get("factory")
-            task_obj = sub_task(termination_config={"max_steps": 10000})
+            task_obj = sub_task(termination_config={"max_steps": self.max_steps})
             task_obj.reset(self._env)
             self.subtasks.append(task_obj)
-        self.task_combo = TaskCombination(self.subtasks or [], bonus_completed_subtask=10.0, sparse_early_subgoals=False)
+        self.task_combo = TaskCombination(self.subtasks or [], bonus_completed_subtask=10.0,
+                                          sparse_early_sub_goals=False)
         self._reset_subtask_progress()
 
-    def reset(self) -> Any:
+    def reset(self) -> dict[str, ...]:
         """
-        Reset the underlying OG environment and optionally load a specific instance.
-        Returns the observation.
+        Reset the full environment and all subtasks.
+        Returns:
+             The initial observation from the environment after reset.
         """
         obs, info = self._env.reset()
 
@@ -251,19 +324,21 @@ class TaskEnv:
         self._reset_subtask_progress()
         return obs
 
-    def step(self, action: th.Tensor):
+    def step(self, action: th.Tensor) -> tuple[dict, float, bool, bool, dict]:
         """
-        Step with a low-level action into both the OG env and current sub-task.
+        Execute one environment step and update subtask progress.
+        Args:
+            action: The control action to apply to the environment.
 
-        Returns: obs, reward_env, terminated_env, truncated_env, info
-        info contains sub-task fields:
-          info["subtask"] = {
-            "name": str,
-            "index": int,
-            "reward": float,
-            "done": bool,
-            "success": bool,
-          }
+        Returns:
+            (obs, reward_env, terminated_env, truncated_env, info_out)
+            where:
+                - obs : Observation after the action.
+                - reward_env : Environment-level reward signal.
+                - terminated_env : Whether the episode is terminated.
+                - truncated_env : Whether the episode was truncated.
+                - info_out : Detailed info including subtask progress and completion flags.
+
         """
         obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
 
@@ -274,9 +349,9 @@ class TaskEnv:
             "reward": 0.0,
             "done": False,
             "success": False,
-            "timeout":False,
-            "falling":False,
-            "max_collision":False
+            "timeout": False,
+            "falling": False,
+            "max_collision": False
         }
 
         if self.task_combo is not None and self.subtasks:
@@ -324,36 +399,53 @@ class TaskEnv:
         return obs, reward_env, terminated_env, truncated_env, info_out
 
     def close(self) -> None:
+        """
+        Close the simulation environment and perform cleanup.
+        Returns:
+            None
+        """
         self._env.close()
         og.shutdown()
 
     def _reset_subtask_progress(self) -> None:
+        """
+        Reset internal tracking of subtask progress.
+        Returns:
+            None
+        """
         self._subtask = None
         self._stage_idx = 0
         self._completed = False
 
 
 if __name__ == "__main__":
+    """
+    python BEHAVIOR-1K/OmniGibson/omnigibson/learning/examples/task_env.py policy=local task.name=cook_bacon log_path=./ +parquet="/home/jiacheng/b1k-baselines/data/data/task-0046/episode_00460040.parquet" headless=false
+    """
     from env_utils import get_transformed_action
+    from rich.console import Console
     from rich.console import Console
     from rich.live import Live
     from env_utils import get_transformed_action, make_table
 
+    with hydra.initialize_config_dir(f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/configs", version_base="1.1"):
+        config = hydra.compose("base_config.yaml", overrides=sys.argv[1:])
 
-    task = "cook_bacon"
-    parquet = "/home/jiacheng/b1k-baselines/data/data/task-0046/episode_00460010.parquet"
+    parquet = config.parquet
+    # Find instance id
+    parquet_path = Path(parquet)
+    instance_id = int((int(parquet_path.stem.split("_")[-1]) // 10) % 1e3)
+
     env = TaskEnv(
-        task_name=task,
-        instance_id=1,
-        subtask_max_steps=5000,
+        config={"config": config},
+        instance_id=instance_id,
     )
-
-    stages = get_sub_tasks(task_name=task)
+    stages = get_sub_tasks(task_name=config.task.name)
 
     # Reset environment and subtasks
     obs = env.reset()
 
-    # Drive with replay
+    # Read actions for replay
     df = pd.read_parquet(parquet)
 
     console = Console()
@@ -367,21 +459,28 @@ if __name__ == "__main__":
             action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
             obs, reward_env, terminated_env, truncated_env, info = env.step(action)
             sub_task_info = info["subtask"]
+
+            idx = sub_task_info["index"]
+            next_idx = idx + 1
+            has_next_stage = next_idx < len(stage_states)
             if sub_task_info["done"]:
-                stage_states[sub_task_info["index"]]["status"] = "completed"
-                if sub_task_info["index"]+1 < len(stage_states):
-                    stage_states[sub_task_info["index"]+1]["status"] = "active"
-            elif sub_task_info["falling"] or sub_task_info["max_collision"]:
-                print("Sub task terminated due to collision/falling")
-                stage_states[sub_task_info["index"]]["status"] = "Failed"
-                if sub_task_info["index"] + 1 < len(stage_states):
-                    stage_states[sub_task_info["index"]+1]["status"] = "active"
+                stage_states[idx]["status"] = "completed"
+
+            elif any([sub_task_info["falling"], sub_task_info["max_collision"], sub_task_info["timeout"]]):
+                print("Sub task terminated due to collision/falling/timeout")
+                stage_states[idx]["status"] = "failed"
+
             else:
+                # Continue
                 pass
-            stage_states[sub_task_info["index"]]["reward"] = sub_task_info["reward"]
+            stage_states[idx]["reward"] = sub_task_info["reward"]
+
+            # Activate the next stage if available
+            if has_next_stage:
+                stage_states[next_idx]["status"] = "active"
 
             live.update(make_table(stage_states))
-            if info["all_subtasks_complete"] :
+            if info["all_subtasks_complete"]:
                 print("All tasks completed")
                 break
 

@@ -72,7 +72,7 @@ move_to_fridge = partial(
 open_fridge = partial(
     SufficientlyOpenTask,
     target_object_name=name_fridge,
-    allowed_deg=90,
+    allowed_deg=80,
     termination_config={"max_steps": 10000},
     include_obs=False,
 )
