@@ -85,13 +85,6 @@ def get_max_steps(task_name):
     # Update observation modalities
     cfg["robots"][0]["obs_modalities"] = ["proprio"]
     cfg["robots"][0]["proprio_obs"] = list(PROPRIOCEPTION_INDICES["R1Pro"].keys())
-    # if cfg.robot.controllers is not None:
-    #     cfg["robots"][0]["controller_config"].update(cfg.robot.controllers)
-    # if cfg.max_steps is None:
-    #     cfg["task"]["termination_config"]["max_steps"] = int(human_stats["length"] * 2)
-    # else:
-    #     cfg["task"]["termination_config"]["max_steps"] = cfg.max_steps
-
     cfg["task"]["termination_config"]["max_steps"] = int(human_stats["length"] * 2)
 
     return cfg
@@ -361,6 +354,8 @@ def make_table(stage_states):
             status = "[green]done[/green]"
         elif state["status"] == "active":
             status = "[yellow]active[/yellow]"
+        elif state["status"] == "Failed":
+            status = "[red]active[/red]"
         else:
             status = "[grey]pending[/grey]"
 
