@@ -153,7 +153,16 @@ def _launch_app():
     # If multi_gpu is used, og.sim.render() will cause a segfault when called during on_contact callbacks,
     # e.g. when an attachment joint is being created due to contacts (create_joint calls og.sim.render() internally).
     gpu_id = None if gm.GPU_ID is None else int(gm.GPU_ID)
-    config_kwargs = {"headless": gm.HEADLESS or bool(gm.REMOTE_STREAMING), "multi_gpu": False}
+    # config_kwargs = {"headless": gm.HEADLESS or bool(gm.REMOTE_STREAMING), "multi_gpu": False}
+    config_kwargs = {
+        "headless": True,
+        "multi_gpu": False,
+        # "renderer": "GPU",
+        "renderer": "RayTracedLighting",
+        "viewport": {"hide_ui": True},  # hide UI
+        "fast_shutdown": True,
+        "rtx_enabled": True  # keep RTX if needed
+    }
     if gpu_id is not None:
         config_kwargs["active_gpu"] = gpu_id
         config_kwargs["physics_gpu"] = gpu_id
@@ -213,6 +222,20 @@ def _launch_app():
 
     # Set the MDL search path so that our OmniGibsonVrayMtl can be found.
     os.environ["MDL_USER_PATH"] = str((Path(__file__).parent / "materials").resolve())
+
+    # performance related
+    sys.argv.append("--/plugins/omni.tbb.globalcontrol/maxThreadCount=1")
+    sys.argv.append("--/plugins/carb.tasking.plugin/threadCount=2")
+    sys.argv.append("--/persistent/physics/numThreads=1")
+    sys.argv.append("--/renderer/cpu/numThreads=1")
+
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+    os.environ["MKL_DOMAIN_NUM_THREADS"] = "1"
+    os.environ["TORCHINDUCTOR_COMPILE_THREADS"] = "1"
 
     launch_context = nullcontext if gm.DEBUG else SuppressLogsUntilError if gm.NO_OMNI_LOGS else suppress_omni_log
 
