@@ -44,6 +44,7 @@ gm.ENABLE_TRANSITION_RULES = True
 name_radio = "radio_89"
 name_coffe_table = "coffee_table_koagbh_0"
 
+
 @task_setup(goal_type="nav", target=name_radio, front_offset=0)
 def make_move_to_radio(max_steps, env):
     return MoveBaseToObjectTask(
@@ -52,6 +53,7 @@ def make_move_to_radio(max_steps, env):
         termination_config={"max_steps": max_steps},
         include_obs=False,
     )
+
 
 @task_setup(goal_type=None, target=name_radio)
 def make_grasp_radio(max_steps, env):
@@ -77,6 +79,7 @@ def make_radio_on(max_steps, env):
     )
     return task
 
+
 def get_sub_stages_factory():
     stages = [
         {"name": "move_to_radio", "kind": "task", "factory": make_move_to_radio},
@@ -86,16 +89,15 @@ def get_sub_stages_factory():
     ]
     return stages
 
+
 console = Console()
 
 
 def run_episode(parquet, env, instance_id, task_name):
-
     obs, _ = env.reset()
     load_task_instance(env, instance_id)
 
     df = pd.read_parquet(parquet)
-
 
     # Stage list with either subtask objects or predicate callables
     stages = get_sub_stages_factory()
@@ -175,14 +177,11 @@ def run_episode(parquet, env, instance_id, task_name):
     return step_rewards, step_success
 
 
-
-
 def main():
     task_name = "turning_on_radio"
     dataset_path = "/home/jiacheng/b1k-baselines/data/data/task-0000/"
     i = 0
-    env = build_env(activity_definition_id=0, instance_id=0, activity_name=task_name,
-                    scene="house_double_floor_lower")
+    env = build_env(activity_definition_id=0, instance_id=0, activity_name=task_name, scene="house_double_floor_lower")
 
     out_dir = Path(task_name)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -208,15 +207,12 @@ def main():
         }
         all_rewards.append(metrics)
         with open(out_dir / "metrics_21_10.jsonl", "a", encoding="utf-8") as fjsonl:
-                fjsonl.write(json.dumps(metrics) + "\n")
+            fjsonl.write(json.dumps(metrics) + "\n")
         break
         # if i>3:
         #     break
         # else:
         #     i += 1
-
-
-
 
     # with open(out_dir / "metrics.jsonl", "a", encoding="utf-8") as fjsonl:
     #     for reward in all_rewards:
@@ -225,10 +221,8 @@ def main():
     # with open(out_dir / "metrics.jsonl", "a", encoding="utf-8") as fjsonl:
     #     fjsonl.write(json.dumps(all_rewards) + "\n")
 
-
     env.close()
     og.shutdown()
-
 
 
 if __name__ == "__main__":

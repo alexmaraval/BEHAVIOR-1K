@@ -49,24 +49,24 @@ class EEFsReachingTask(BaseNavigationTask):
     """
 
     def __init__(
-            self,
-            target_object_name: str,
-            robot_idn=0,
-            floor=0,
-            initial_pos=None,
-            initial_quat=None,
-            goal_pos=None,
-            goal_tolerance=0.1,
-            goal_in_polar=False,
-            path_range=None,
-            goal_height=0.06,
-            waypoint_height=0.05,
-            waypoint_width=0.1,
-            n_vis_waypoints=10,
-            reward_config=None,
-            termination_config=None,
-            include_obs=True,
-            skip_collision_with_objs=None
+        self,
+        target_object_name: str,
+        robot_idn=0,
+        floor=0,
+        initial_pos=None,
+        initial_quat=None,
+        goal_pos=None,
+        goal_tolerance=0.1,
+        goal_in_polar=False,
+        path_range=None,
+        goal_height=0.06,
+        waypoint_height=0.05,
+        waypoint_width=0.1,
+        n_vis_waypoints=10,
+        reward_config=None,
+        termination_config=None,
+        include_obs=True,
+        skip_collision_with_objs=None,
     ):
         # Run super
         super().__init__(
@@ -87,7 +87,7 @@ class EEFsReachingTask(BaseNavigationTask):
             reward_config=reward_config,
             termination_config=termination_config,
             include_obs=include_obs,
-            skip_collision_with_objs=skip_collision_with_objs
+            skip_collision_with_objs=skip_collision_with_objs,
         )
 
     def _create_termination_conditions(self):
@@ -130,16 +130,16 @@ class EEFsReachingTask(BaseNavigationTask):
 
 class MoveEEToObjectTask(EEFsReachingTask):
     def __init__(
-            self,
-            target_object_name: str,
-            front_offset: float = 0.0,
-            robot_idn: int = 0,
-            goal_tolerance: float = 0.04,
-            max_steps: int | None = None,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = True,
-            **kwargs,
+        self,
+        target_object_name: str,
+        front_offset: float = 0.0,
+        robot_idn: int = 0,
+        goal_tolerance: float = 0.04,
+        max_steps: int | None = None,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = True,
+        **kwargs,
     ):
         self._front_offset = front_offset
         self.prev_reward = 0.0
@@ -206,7 +206,7 @@ class MoveEEToObjectTask(EEFsReachingTask):
                 poses = []
                 try:
                     poses.append(r.get_eef_position(arm="left"))
-                except  TypeError:
+                except TypeError:
                     pass
                 try:
                     poses.append(r.get_eef_position(arm="right"))

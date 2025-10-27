@@ -209,6 +209,7 @@ def make_grasp_pan(prev_reward, env):
     )
     return task
 
+
 def get_sub_stages_factory():
     stages = [
         {"name": "move_to_fridge", "kind": "task", "factory": make_move_to_fridge},
@@ -228,6 +229,7 @@ def get_sub_stages_factory():
     ]
     return stages
 
+
 console = Console()
 
 
@@ -236,8 +238,9 @@ def main():
     ap.add_argument("--parquet", type=str, required=True)
     args = ap.parse_args()
 
-    env = build_env(activity_definition_id=0, instance_id=0,
-                    activity_name="cook_bacon")  # Predefined IDs for episode_00460010
+    env = build_env(
+        activity_definition_id=0, instance_id=0, activity_name="cook_bacon"
+    )  # Predefined IDs for episode_00460010
     obs, _ = env.reset()
     load_task_instance(env, 1)
 

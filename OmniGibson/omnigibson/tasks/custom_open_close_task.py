@@ -95,10 +95,10 @@ def _joint_open_metrics(joint, direction):
 
 
 def _is_closed_le_angle(
-        obj,
-        max_deg: float = 5.0,
-        max_frac: float = 0.1,
-        require_all: bool = True,
+    obj,
+    max_deg: float = 5.0,
+    max_frac: float = 0.1,
+    require_all: bool = True,
 ) -> bool:
     """
     Return True if the door is sufficiently closed:
@@ -114,7 +114,7 @@ def _is_closed_le_angle(
         if j.joint_type == JointType.JOINT_REVOLUTE:
             closed_ok = (opened <= angle_tol) or (total > 1e-6 and frac <= max_frac)
         else:
-            closed_ok = (total > 1e-6 and frac <= max_frac)
+            closed_ok = total > 1e-6 and frac <= max_frac
         results.append(closed_ok)
 
     return all(results) if require_all else any(results)
@@ -157,14 +157,16 @@ def _open_angles(obj):
         angle_deg = math.degrees(opened) if j.joint_type == JointType.JOINT_REVOLUTE else 0.0
         if j.joint_type == JointType.JOINT_REVOLUTE:
             max_angle_deg = max(max_angle_deg, angle_deg)
-        per_joint.append({
-            "name": nm,
-            "type": j.joint_type,
-            "opened": opened,
-            "total": total,
-            "fraction": frac,
-            "angle_deg": angle_deg,
-        })
+        per_joint.append(
+            {
+                "name": nm,
+                "type": j.joint_type,
+                "opened": opened,
+                "total": total,
+                "fraction": frac,
+                "angle_deg": angle_deg,
+            }
+        )
 
     return {"max_angle_deg": max_angle_deg, "per_joint": per_joint}
 
@@ -184,14 +186,14 @@ class SufficientlyOpenTask(BaseTask):
     """
 
     def __init__(
-            self,
-            target_object_name: str,
-            allowed_deg: float = 90.0,
-            allowed_frac: float = 0.8,
-            status: str = "open",
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        allowed_deg: float = 90.0,
+        allowed_frac: float = 0.8,
+        status: str = "open",
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._target = target_object_name
         self._allowed_deg = float(allowed_deg)
@@ -295,26 +297,20 @@ class SufficientlyOpenTask(BaseTask):
         done_out = any(d.get("done", False) for d in tc.values())
         return float(dense), done_out, info
 
-
     @classproperty
     def default_reward_config(cls):
-        return {
-            "r_scale": 1.0,
-            "r_success": 10.0,
-            "r_clip_abs": 0.0,
-            "r_offset": 0.0
-        }
+        return {"r_scale": 1.0, "r_success": 10.0, "r_clip_abs": 0.0, "r_offset": 0.0}
 
 
 class SufficientlyClosedTask(SufficientlyOpenTask):
     def __init__(
-            self,
-            target_object_name: str,
-            allowed_deg: float = 5.0,
-            allowed_frac: float = 0.1,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        allowed_deg: float = 5.0,
+        allowed_frac: float = 0.1,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         super().__init__(
             target_object_name=target_object_name,
@@ -386,4 +382,3 @@ class SufficientlyClosedTask(SufficientlyOpenTask):
         done_out = any(d.get("done", False) for d in tc.values())
 
         return dense, done_out, info
-

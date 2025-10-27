@@ -12,13 +12,13 @@ from omnigibson.utils.python_utils import classproperty
 
 class _PredicateToggleTask(BaseTask):
     def __init__(
-            self,
-            target_object_name: str,
-            desired_predicate: str,
-            desired_value: bool,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        desired_predicate: str,
+        desired_value: bool,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._target_object_name = target_object_name
         self._pred = desired_predicate.lower()
@@ -99,10 +99,12 @@ class _PredicateToggleTask(BaseTask):
     @classproperty
     def default_reward_config(cls):
         base = {}
-        base.update({
-            "r_offset": 0.0,
-            "use_normalized_potential": False,
-        })
+        base.update(
+            {
+                "r_offset": 0.0,
+                "use_normalized_potential": False,
+            }
+        )
         return base
 
 
@@ -122,16 +124,15 @@ class CloseTask(_PredicateToggleTask):
 
 
 class _RelativeStatusTask(BaseTask):
-
     def __init__(
-            self,
-            target_object_name: str,
-            source_object_name: str,
-            desired_predicate: str,
-            desired_value: bool,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        source_object_name: str,
+        desired_predicate: str,
+        desired_value: bool,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._target_object_name = target_object_name
         self._source_object_name = source_object_name
@@ -244,14 +245,14 @@ class OnTopTask(_RelativeStatusTask):
 
 class OnTopStableTask(BaseTask):
     def __init__(
-            self,
-            target_object_name: str,
-            source_object_name: str,
-            xy_tol: float = 0.23,  # center alignment tolerance
-            require_release: bool = True,  # must not be grasped by robot
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        source_object_name: str,
+        xy_tol: float = 0.23,  # center alignment tolerance
+        require_release: bool = True,  # must not be grasped by robot
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._tgt = target_object_name
         self._src = source_object_name
@@ -278,10 +279,12 @@ class OnTopStableTask(BaseTask):
     @classproperty
     def default_reward_config(cls):
         base = {}
-        base.update({
-            "r_offset": 1.0,
-            "use_normalized_potential": False,
-        })
+        base.update(
+            {
+                "r_offset": 1.0,
+                "use_normalized_potential": False,
+            }
+        )
         return base
 
     def reset(self, env):
@@ -308,8 +311,9 @@ class OnTopStableTask(BaseTask):
             return 1.0, True, info
 
         # Allow timeout
-        base_done, base_info = super()._step_termination(env=env, action=action, info={
-            "done": {"success": False, "termination_conditions": {}}})
+        base_done, base_info = super()._step_termination(
+            env=env, action=action, info={"done": {"success": False, "termination_conditions": {}}}
+        )
         tc = dict(base_info.get("done", {}).get("termination_conditions", {}))
         for k, v in list(tc.items()):
             if not isinstance(v, dict):

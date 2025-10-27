@@ -18,7 +18,7 @@ from omnigibson.utils.python_utils import recursively_convert_to_torch
 from omnigibson.tasks.custom_tasks import _get_named, _front_target
 from omnigibson.object_states import Pose
 from omnigibson.tasks.point_reaching_task import PointReachingTask
-from omnigibson.learning.utils.eval_utils import (TASK_NAMES_TO_INDICES, generate_basic_environment_config)
+from omnigibson.learning.utils.eval_utils import TASK_NAMES_TO_INDICES, generate_basic_environment_config
 from gello.robots.sim_robot.og_teleop_utils import (
     augment_rooms,
     load_available_tasks,
@@ -38,12 +38,15 @@ def build_transform(theta, pos_xy, z=0.0):
     Create a 4x4 homogeneous transform for rotation around Z and translation in XY plane
     z: robot height
     """
-    return np.array([
-        [np.cos(theta), -np.sin(theta), 0, pos_xy[0]],
-        [np.sin(theta), np.cos(theta), 0, pos_xy[1]],
-        [0, 0, 1, z],
-        [0, 0, 0, 1]
-    ])
+    return np.array(
+        [
+            [np.cos(theta), -np.sin(theta), 0, pos_xy[0]],
+            [np.sin(theta), np.cos(theta), 0, pos_xy[1]],
+            [0, 0, 1, z],
+            [0, 0, 0, 1],
+        ]
+    )
+
 
 def get_max_steps(task_name):
     human_stats = {
@@ -68,7 +71,7 @@ def get_max_steps(task_name):
     # Load the seed instance by default
     available_tasks = load_available_tasks()
     task_cfg = available_tasks[task_name][0]
-    robot_type = "R1Pro" #cfg.robot.type TODO
+    robot_type = "R1Pro"  # cfg.robot.type TODO
     cfg = generate_basic_environment_config(task_name=task_name, task_cfg=task_cfg)
     # breakpoint()
     # if cfg["partial_scene_load"]:
@@ -113,27 +116,57 @@ def build_env(activity_definition_id: int, instance_id: int, activity_name: str,
                 "proprio_obs": list(PROPRIOCEPTION_INDICES["R1Pro"].keys()),
                 "obs_modalities": ["proprio"],
                 "controller_config": {
-                    "arm_left": {"name": "JointController", "motor_type": "position", "pos_kp": 150,
-                                 "command_input_limits": None, "command_output_limits": None, "use_impedances": False,
-                                 "use_delta_commands": False},
-                    "arm_right": {"name": "JointController", "motor_type": "position", "pos_kp": 150,
-                                  "command_input_limits": None, "command_output_limits": None, "use_impedances": False,
-                                  "use_delta_commands": False},
-                    "gripper_left": {"name": "MultiFingerGripperController", "mode": "smooth",
-                                     "command_input_limits": "default", "command_output_limits": "default"},
-                    "gripper_right": {"name": "MultiFingerGripperController", "mode": "smooth",
-                                      "command_input_limits": "default", "command_output_limits": "default"},
-                    "base": {"name": "HolonomicBaseJointController", "motor_type": "position", "pos_kp": 50,
-                             "command_input_limits": None,
-                             "command_output_limits": None,
-                             "use_impedances": False},
+                    "arm_left": {
+                        "name": "JointController",
+                        "motor_type": "position",
+                        "pos_kp": 150,
+                        "command_input_limits": None,
+                        "command_output_limits": None,
+                        "use_impedances": False,
+                        "use_delta_commands": False,
+                    },
+                    "arm_right": {
+                        "name": "JointController",
+                        "motor_type": "position",
+                        "pos_kp": 150,
+                        "command_input_limits": None,
+                        "command_output_limits": None,
+                        "use_impedances": False,
+                        "use_delta_commands": False,
+                    },
+                    "gripper_left": {
+                        "name": "MultiFingerGripperController",
+                        "mode": "smooth",
+                        "command_input_limits": "default",
+                        "command_output_limits": "default",
+                    },
+                    "gripper_right": {
+                        "name": "MultiFingerGripperController",
+                        "mode": "smooth",
+                        "command_input_limits": "default",
+                        "command_output_limits": "default",
+                    },
+                    "base": {
+                        "name": "HolonomicBaseJointController",
+                        "motor_type": "position",
+                        "pos_kp": 50,
+                        "command_input_limits": None,
+                        "command_output_limits": None,
+                        "use_impedances": False,
+                    },
                     # "base": {"name": "HolonomicBaseJointController", "motor_type": "velocity", "vel_kp": 150,
                     #          "command_input_limits": [[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]],
                     #          "command_output_limits": [[-0.75, -0.75, -1.0], [0.75, 0.75, 1.0]],
                     #          "use_impedances": False},
-                    "trunk": {"name": "JointController", "motor_type": "position", "pos_kp": 150,
-                              "command_input_limits": None, "command_output_limits": None, "use_impedances": False,
-                              "use_delta_commands": False},
+                    "trunk": {
+                        "name": "JointController",
+                        "motor_type": "position",
+                        "pos_kp": 150,
+                        "command_input_limits": None,
+                        "command_output_limits": None,
+                        "use_impedances": False,
+                        "use_delta_commands": False,
+                    },
                     "camera": {"name": "NullJointController"},
                 },
                 "sensor_config": {"VisionSensor": {"sensor_kwargs": {"image_height": 1080, "image_width": 1080}}},
@@ -289,23 +322,21 @@ def set_missing_objects(env):
     def quat_mul(q1, q2):
         x1, y1, z1, w1 = q1
         x2, y2, z2, w2 = q2
-        return th.tensor([
-            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-        ], dtype=q1.dtype)
+        return th.tensor(
+            [
+                w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+                w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            ],
+            dtype=q1.dtype,
+        )
 
     # rotate 30° around Z-axis (handle turns 30° horizontally)
     angle_deg = -65.0  # adjust + or - depending on direction
     angle_rad = math.radians(angle_deg)
 
-    delta_quat = th.tensor([
-        0.0,
-        0.0,
-        math.sin(angle_rad / 2.0),
-        math.cos(angle_rad / 2.0)
-    ], dtype=th.float32)
+    delta_quat = th.tensor([0.0, 0.0, math.sin(angle_rad / 2.0), math.cos(angle_rad / 2.0)], dtype=th.float32)
 
     # apply rotation
     new_quat = quat_mul(delta_quat, quat)
