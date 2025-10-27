@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from pathlib import Path
@@ -87,10 +88,12 @@ class TaskCombination:
         # Sparse early subtasks if requested
         if self.sparse_early_sub_goals and (self.current_index < len(self.tasks) - 1):
             reward = 0.0
-
         if done:
             self.current_index += 1
-            return self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
+            if info["done"]["success"]:
+                return self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
+            else:
+                return -self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
 
         return float(reward), False, info
 
@@ -489,7 +492,6 @@ if __name__ == "__main__":
         +run_all=true +write_rewards=true        
     """
     import sys
-    import json
     import torch as th
     import pandas as pd
     from inspect import getsourcefile
