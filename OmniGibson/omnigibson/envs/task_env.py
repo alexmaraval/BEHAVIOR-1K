@@ -503,10 +503,18 @@ class TaskEnv:
 
 # ----- Utilities to drive the example code-----
 
-def build_transform(theta, pos_xy, z=0.0):
+def build_transform(theta, pos_xy, z=0.0) -> np.ndarray:
     """
-    Create a 4x4 homogeneous transform for rotation around Z and translation in XY plane
-    z: robot height
+    Build a 4×4 homogeneous transformation matrix representing a rotation around the Z-axis
+    and a translation in the XY plane.
+    Args:
+        theta: Rotation angle in radians about the Z-axis.
+        pos_xy: XY translation components [x, y].
+        z: Z translation component (height).
+
+    Returns:
+        A 4×4 homogeneous transformation matrix
+
     """
     return np.array([
         [np.cos(theta), -np.sin(theta), 0, pos_xy[0]],
@@ -516,7 +524,17 @@ def build_transform(theta, pos_xy, z=0.0):
     ])
 
 
-def get_transformed_action(row, base_pos, yaw2d):
+def get_transformed_action(row, base_pos, yaw2d) -> np.ndarray:
+    """
+     Compute a robot action transformed into a base-relative coordinate frame.
+    Args:
+        row: A dictionary containing observation and action.
+        base_pos: Original action vector to be updated.
+        yaw2d: Base yaw angle (rotation about Z-axis) in radians.
+
+    Returns:
+        The transformed action vector
+    """
     pos = base_pos.detach().cpu().numpy().tolist()
     z = 0  # Z coordinate
     tm_1 = build_transform(yaw2d.detach().cpu().numpy().tolist(), pos, z)
@@ -536,7 +554,14 @@ def get_transformed_action(row, base_pos, yaw2d):
 
 
 def make_table(stage_states):
-    """Return a Rich Table object representing current stage states."""
+    """
+    Create a Rich-formatted table displaying progress and rewards for multiple stages.
+    Args:
+        stage_states: List of stage state dictionaries.
+
+    Returns:
+        A Rich Table object ready for console rendering.
+    """
     table = Table(title="Stage Progress", expand=True)
     table.add_column("Idx", justify="right")
     table.add_column("Stage", justify="left")
