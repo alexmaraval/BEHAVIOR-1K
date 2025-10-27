@@ -1,10 +1,7 @@
-import json
 import os
 import sys
 from pathlib import Path
 
-import hydra
-import pandas as pd
 import torch as th
 
 sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
@@ -24,7 +21,6 @@ from gello.robots.sim_robot.og_teleop_utils import (
 from omnigibson.utils.asset_utils import get_task_instance_path
 from omnigibson.utils.python_utils import recursively_convert_to_torch
 from task_factory import get_sub_tasks
-from inspect import getsourcefile
 from omnigibson.robots import BaseRobot
 
 gm.ENABLE_FLATCACHE = True
@@ -125,6 +121,7 @@ class TaskEnv:
         self.max_steps = max_steps
         self.instance_id = instance_id
         self.use_domain_randomization = use_domain_randomization
+        self._robot = None
 
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
@@ -143,7 +140,7 @@ class TaskEnv:
         self._completed = False
 
         self._env = self.load_env()
-        self._robot = self.load_robot()
+        self.load_robot()
         self.load_task_instance()
         self.set_subtasks()
         self.reset()
@@ -225,10 +222,9 @@ class TaskEnv:
         """
         Retrieve the robot instance from the simulation environment.
         Returns:
-            The robot object registered under `"robot_r1"` in the scene.
+            None
         """
-        robot = self.env.scene.object_registry("name", "robot_r1")
-        return robot
+        self._robot = self.env.scene.object_registry("name", "robot_r1")
 
     def load_task_instance(self) -> None:
         """
@@ -420,68 +416,126 @@ class TaskEnv:
 
 if __name__ == "__main__":
     """
-    python BEHAVIOR-1K/OmniGibson/omnigibson/learning/examples/task_env.py policy=local task.name=cook_bacon log_path=./ +parquet="/home/jiacheng/b1k-baselines/data/data/task-0046/episode_00460040.parquet" headless=false
+    Usage:
+    # Run a single episode
+    python BEHAVIOR-1K/OmniGibson/omnigibson/learning/examples/task_env.py policy=local task.name=cook_bacon \
+        log_path=./ +parquet="/home/jiacheng/b1k-baselines/data/data/task-0046/episode_00460040.parquet" headless=false
+
+    # Run all episodes in a directory
+    python BEHAVIOR-1K/OmniGibson/omnigibson/learning/examples/task_env.py policy=local task.name=cook_bacon \
+        log_path=./ +parquet_dir="/home/jiacheng/b1k-baselines/data/data/task-0046/" headless=true \
+        +run_all=true +write_rewards=true
     """
-    from env_utils import get_transformed_action
-    from rich.console import Console
+    import sys
+    import json
+    import torch as th
+    import pandas as pd
+    from inspect import getsourcefile
+    from tqdm import tqdm
     from rich.console import Console
     from rich.live import Live
-    from env_utils import get_transformed_action, make_table
+    import hydra
 
-    with hydra.initialize_config_dir(f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/configs", version_base="1.1"):
+    from env_utils import get_transformed_action, make_table
+    from task_env import TaskEnv
+
+    with hydra.initialize_config_dir(
+        f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/configs", version_base="1.1"
+    ):
         config = hydra.compose("base_config.yaml", overrides=sys.argv[1:])
 
-    parquet = config.parquet
-    # Find instance id
-    parquet_path = Path(parquet)
-    instance_id = int((int(parquet_path.stem.split("_")[-1]) // 10) % 1e3)
+    console = Console()
 
-    env = TaskEnv(
-        config={"config": config},
-        instance_id=instance_id,
-    )
+    # --- Determine mode ---
+    run_all = getattr(config, "run_all", False)
+    write_rewards = getattr(config, "write_rewards", False)
+
+    if run_all:
+        parquet_dir = Path(config.get("parquet_dir", config.get("parquet", "")))
+        parquet_files = sorted(parquet_dir.glob("*.parquet"))
+        console.rule(f"[bold cyan]Running ALL episodes from {parquet_dir}")
+    else:
+        parquet = Path(config.get("parquet", ""))
+        parquet_files = [parquet]
+        console.rule(f"[bold cyan]Running SINGLE episode: {parquet.name}")
+
+    # --- Output directory ---
+    out_dir = Path(config.get("log_path", "./logs")) / config.task.name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- Initialize environment ---
+    env = TaskEnv(config={"config": config}, instance_id=1)
     stages = get_sub_tasks(task_name=config.task.name)
 
-    # Reset environment and subtasks
-    obs = env.reset()
+    # --- Loop over episodes ---
+    for ep_idx, parquet_path in enumerate(
+        tqdm(parquet_files, desc="Episodes", unit="episode"), start=1
+    ):
+        instance_id = int((int(parquet_path.stem.split("_")[-1]) // 10) % 1e3)
 
-    # Read actions for replay
-    df = pd.read_parquet(parquet)
+        # Re-use environment
+        env.instance_id = instance_id
+        env.load_robot()
+        env.load_task_instance()
+        env.set_subtasks()
+        obs = env.reset()
 
-    console = Console()
-    stage_states = [{"name": s["name"], "reward": 0.0, "status": "pending"} for s in stages]
-    stage_states[0]["status"] = "active"
+        df = pd.read_parquet(parquet_path)
+        stage_states = [{"name": s["name"], "reward": 0.0, "status": "pending"} for s in stages]
+        stage_states[0]["status"] = "active"
 
-    with Live(make_table(stage_states), console=console, refresh_per_second=4) as live:
-        for _, row in df.iterrows():
-            base_pos = obs["robot_r1"]["proprio"][140:142]
-            yaw2d = obs["robot_r1"]["proprio"][149]
-            action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
-            obs, reward_env, terminated_env, truncated_env, info = env.step(action)
-            sub_task_info = info["subtask"]
+        step_rewards = []
+        step_success = False
 
-            idx = sub_task_info["index"]
-            next_idx = idx + 1
-            has_next_stage = next_idx < len(stage_states)
-            if sub_task_info["done"]:
-                stage_states[idx]["status"] = "completed"
+        with Live(make_table(stage_states), console=console, refresh_per_second=4) as live:
+            for _, row in df.iterrows():
+                base_pos = obs["robot_r1"]["proprio"][140:142]
+                yaw2d = obs["robot_r1"]["proprio"][149]
+                action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
 
-            elif any([sub_task_info["falling"], sub_task_info["max_collision"], sub_task_info["timeout"]]):
-                print("Sub task terminated due to collision/falling/timeout")
-                stage_states[idx]["status"] = "failed"
+                obs, reward_env, terminated_env, truncated_env, info = env.step(action)
+                sub_task_info = info["subtask"]
+                idx = sub_task_info["index"]
+                next_idx = idx + 1
+                has_next_stage = next_idx < len(stage_states)
 
-            else:
-                # Continue
-                pass
-            stage_states[idx]["reward"] = sub_task_info["reward"]
+                # Update stage info
+                if sub_task_info["done"]:
+                    stage_states[idx]["status"] = "completed"
+                elif any(sub_task_info.get(k, False) for k in ("falling", "max_collision", "timeout")):
+                    console.print("[red]Sub task terminated due to collision/falling/timeout")
+                    stage_states[idx]["status"] = "failed"
 
-            # Activate the next stage if available
-            if has_next_stage:
-                stage_states[next_idx]["status"] = "active"
+                stage_states[idx]["reward"] = sub_task_info["reward"]
+                step_rewards.append(float(sub_task_info["reward"]))
 
-            live.update(make_table(stage_states))
-            if info["all_subtasks_complete"]:
-                print("All tasks completed")
-                break
+                # Move to the next stage
+                if sub_task_info["done"] and has_next_stage:
+                    stage_states[next_idx]["status"] = "active"
+
+                live.update(make_table(stage_states))
+
+                # Stop if all done
+                if info.get("all_subtasks_complete", False):
+                    console.print("[green]All subtasks completed!")
+                    step_success = True
+                    break
+
+        # --- Save metrics ---
+        if write_rewards:
+            metrics = {
+                "file_name": parquet_path.name,
+                "reward": step_rewards,
+                "is_successful": step_success,
+            }
+            metrics_file = out_dir / "metrics.jsonl"
+            with open(metrics_file, "a", encoding="utf-8") as fjsonl:
+                fjsonl.write(json.dumps(metrics) + "\n")
+
+            console.print(f"[blue]Metrics saved to {metrics_file}")
+
+        console.rule(f"[green]Episode {ep_idx} finished")
 
     env.close()
+
+    console.print("[bold cyan] All requested episodes completed successfully.")
