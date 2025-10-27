@@ -440,7 +440,7 @@ if __name__ == "__main__":
     from task_env import TaskEnv
 
     with hydra.initialize_config_dir(
-        f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/configs", version_base="1.1"
+            f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/configs", version_base="1.1"
     ):
         config = hydra.compose("base_config.yaml", overrides=sys.argv[1:])
 
@@ -469,7 +469,7 @@ if __name__ == "__main__":
 
     # --- Loop over episodes ---
     for ep_idx, parquet_path in enumerate(
-        tqdm(parquet_files, desc="Episodes", unit="episode"), start=1
+            tqdm(parquet_files, desc="Episodes", unit="episode"), start=1
     ):
         instance_id = int((int(parquet_path.stem.split("_")[-1]) // 10) % 1e3)
 
