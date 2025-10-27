@@ -15,7 +15,7 @@ def get_sub_tasks(task_name: str) -> list[dict[str, ...]]:
     return task_factory[task_name]
 
 
-# -----turning_on_radio-------
+# -----turning_on_radio-----
 name_radio = "radio_89"
 name_coffe_table = "coffee_table_koagbh_0"
 
@@ -48,7 +48,7 @@ stages = [
 ]
 task_factory.update({"turning_on_radio": stages})
 
-# ---------cook_bacon----------------
+# -----cook_bacon-----
 name_fridge = "fridge_dszchb_0"
 name_countertop = "countertop_kelker_0"
 name_pan = "frying_pan_207"

@@ -2,6 +2,8 @@ import os
 import sys
 from pathlib import Path
 
+import math
+import numpy as np
 import torch as th
 
 sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
@@ -20,8 +22,9 @@ from gello.robots.sim_robot.og_teleop_utils import (
 )
 from omnigibson.utils.asset_utils import get_task_instance_path
 from omnigibson.utils.python_utils import recursively_convert_to_torch
-from task_factory import get_sub_tasks
+from omnigibson.tasks.task_factory import get_sub_tasks
 from omnigibson.robots import BaseRobot
+from rich.table import Table
 
 gm.ENABLE_FLATCACHE = True
 gm.USE_GPU_DYNAMICS = False
@@ -414,17 +417,76 @@ class TaskEnv:
         self._completed = False
 
 
+# ----- Utilities to drive the example code-----
+
+def build_transform(theta, pos_xy, z=0.0):
+    """
+    Create a 4x4 homogeneous transform for rotation around Z and translation in XY plane
+    z: robot height
+    """
+    return np.array([
+        [np.cos(theta), -np.sin(theta), 0, pos_xy[0]],
+        [np.sin(theta), np.cos(theta), 0, pos_xy[1]],
+        [0, 0, 1, z],
+        [0, 0, 0, 1]
+    ])
+
+
+def get_transformed_action(row, base_pos, yaw2d):
+    pos = base_pos.detach().cpu().numpy().tolist()
+    z = 0  # Z coordinate
+    tm_1 = build_transform(yaw2d.detach().cpu().numpy().tolist(), pos, z)
+
+    theta2 = row["observation.state"][149]  # rotation
+    pos_xy2 = row["observation.state"][140:142]  # XY
+    tm_2 = build_transform(theta2, pos_xy2, z)
+
+    tm_new = np.linalg.inv(tm_1) @ tm_2  # chaining transformations
+    action_translation = tm_new[:2, 3]
+    action_rotation = math.atan2(tm_new[1, 0], tm_new[0, 0])
+
+    action = row["action"].copy()
+    action[0:2] = action_translation
+    action[2] = action_rotation
+    return action
+
+
+def make_table(stage_states):
+    """Return a Rich Table object representing current stage states."""
+    table = Table(title="Stage Progress", expand=True)
+    table.add_column("Idx", justify="right")
+    table.add_column("Stage", justify="left")
+    table.add_column("Status", justify="center")
+    table.add_column("Reward", justify="right")
+
+    for idx, st in enumerate(stage_states):
+        state = stage_states[idx]
+        if state["status"] == "completed":
+            status = "[green]done[/green]"
+        elif state["status"] == "active":
+            status = "[yellow]active[/yellow]"
+        elif state["status"] == "Failed":
+            status = "[red]active[/red]"
+        else:
+            status = "[grey]pending[/grey]"
+
+        reward_str = f"{state['reward']:.3f}"
+        table.add_row(str(idx), st["name"], status, reward_str)
+
+    return table
+
+
 if __name__ == "__main__":
     """
     Usage:
     # Run a single episode
-    python BEHAVIOR-1K/OmniGibson/omnigibson/learning/examples/task_env.py policy=local task.name=cook_bacon \
+    python BEHAVIOR-1K/OmniGibson/omnigibson/envs/task_env.py policy=local task.name=cook_bacon \
         log_path=./ +parquet="/home/jiacheng/b1k-baselines/data/data/task-0046/episode_00460040.parquet" headless=false
 
     # Run all episodes in a directory
-    python BEHAVIOR-1K/OmniGibson/omnigibson/learning/examples/task_env.py policy=local task.name=cook_bacon \
+    python BEHAVIOR-1K/OmniGibson/omnigibson/envs/task_env.py policy=local task.name=cook_bacon \
         log_path=./ +parquet_dir="/home/jiacheng/b1k-baselines/data/data/task-0046/" headless=true \
-        +run_all=true +write_rewards=true
+        +run_all=true +write_rewards=true        
     """
     import sys
     import json
@@ -435,12 +497,10 @@ if __name__ == "__main__":
     from rich.console import Console
     from rich.live import Live
     import hydra
-
-    from env_utils import get_transformed_action, make_table
     from task_env import TaskEnv
 
     with hydra.initialize_config_dir(
-            f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/configs", version_base="1.1"
+            f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/learning/configs", version_base="1.1"
     ):
         config = hydra.compose("base_config.yaml", overrides=sys.argv[1:])
 
