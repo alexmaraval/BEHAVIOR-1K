@@ -452,7 +452,6 @@ class TaskEnv:
                 entries[k] = v
         return entries, robot_poses
 
-
     def randomize_scene_instances(self, instances_dir) -> dict[str, dict]:
         """
         Randomly combines object and robot configurations from multiple scene instance files.
@@ -506,6 +505,7 @@ class TaskEnv:
 
 
 # ----- Utilities to drive the example code-----
+
 
 def build_transform(theta, pos_xy, z=0.0) -> np.ndarray:
     """
@@ -614,7 +614,7 @@ if __name__ == "__main__":
     from task_env import TaskEnv
 
     with hydra.initialize_config_dir(
-            f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/learning/configs", version_base="1.1"
+        f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/learning/configs", version_base="1.1"
     ):
         config = hydra.compose("base_config.yaml", overrides=sys.argv[1:])
 
