@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -128,6 +129,7 @@ class TaskEnv:
         self.instance_id = instance_id
         self.use_domain_randomization = use_domain_randomization
         self._robot = None
+        self.robot_type = "R1Pro"
 
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
@@ -181,7 +183,7 @@ class TaskEnv:
         # Load the seed instance by default
         available_tasks = load_available_tasks()
         task_cfg = available_tasks[self.task_name][0]
-        robot_type = "R1Pro"  # cfg.robot.type TODO
+          # cfg.robot.type TODO
         cfg = generate_basic_environment_config(task_name=self.task_name, task_cfg=task_cfg)
 
         relevant_rooms = get_task_relevant_room_types(activity_name=self.task_name)
@@ -249,8 +251,14 @@ class TaskEnv:
             get_task_instance_path(scene_model),
             f"json/{scene_model}_task_{self._env.task.activity_name}_instances/{tro_filename}-tro_state.json",
         )
-        with open(tro_file_path, "r") as f:
-            tro_state = recursively_convert_to_torch(json.load(f))
+
+        if self.use_domain_randomization:
+            scene_data = self.randomize_scene_instances(Path(tro_file_path).parent)
+        else:
+            with open(tro_file_path, "r") as f:
+                scene_data = json.load(f)
+
+        tro_state = recursively_convert_to_torch(scene_data)
         for tro_key, state_data in tro_state.items():
             if tro_key == "robot_poses":
                 presampled_robot_poses = state_data
@@ -418,6 +426,80 @@ class TaskEnv:
         self._subtask = None
         self._stage_idx = 0
         self._completed = False
+
+    @staticmethod
+    def collect_tokens_and_entries(data: dict) -> tuple[dict[str, dict], dict]:
+        """
+        Extracts object entries and robot pose information from a scene JSON dictionary
+        Args:
+            data: A dictionary loaded from a scene JSON file.
+
+        Returns:
+            A tuple containing:
+              - entries: Mapping of object names to their state definitions.
+              - robot_poses: Mapping of robot types to their corresponding pose data.
+
+        """
+        entries = {}
+        robot_poses = data.get("robot_poses")
+        for k, v in data.items():
+            if k == "robot_poses":
+                continue
+            if isinstance(v, dict) and ("root_link" in v or "args" in v):
+                entries[k] = v
+        return entries, robot_poses
+
+
+    def randomize_scene_instances(self, instances_dir) -> dict[str, dict]:
+        """
+        Randomly combines object and robot configurations from multiple scene instance files.
+        Args:
+            instances_dir: Path to the directory containing scene instance JSON files.
+
+        Returns:
+            A dictionary representing the randomized scene configuration.
+
+        """
+        instances_dir = Path(instances_dir)
+        cache_path = Path("random_scenes") / "per_file_entries.json"
+
+        if cache_path.exists():
+            per_file_entries = json.loads(cache_path.read_text())
+        else:
+            scene_files = sorted(instances_dir.glob("*.json"))
+            if not scene_files:
+                raise FileNotFoundError(f"No JSON instance files found in {instances_dir}")
+
+            per_file_entries = {}
+
+            for scene_file in scene_files:
+                data = json.loads(scene_file.read_text())
+                entries, robot_poses = TaskEnv.collect_tokens_and_entries(data)
+
+                for obj, state in {**entries, **robot_poses}.items():
+                    per_file_entries.setdefault(obj, [])
+                    if state not in per_file_entries[obj]:
+                        per_file_entries[obj].append(state)
+
+            # Save to file
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(per_file_entries, indent=2))
+
+        # Use the first scene as a template
+        first_scene = sorted(instances_dir.glob("*.json"))[0]
+        scene_data = json.loads(first_scene.read_text())
+
+        # Randomly pick one variant for each object
+        for key in scene_data.keys():
+            if key == "robot_poses":
+                robot_states = per_file_entries.get(self.robot_type, [])
+                if robot_states:
+                    scene_data[key][self.robot_type] = random.choice(robot_states)
+            else:
+                if key in per_file_entries and per_file_entries[key]:
+                    scene_data[key] = random.choice(per_file_entries[key])
+
+        return scene_data
 
 
 # ----- Utilities to drive the example code-----
