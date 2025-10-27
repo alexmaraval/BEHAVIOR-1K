@@ -12,6 +12,7 @@ from omnigibson.termination_conditions.termination_condition_base import Success
 from omnigibson.termination_conditions.falling import Falling
 from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _get_named, _front_target
 
+
 class _GraspSuccess(SuccessCondition):
     """Success when the specified object is currently grasped by any arm."""
 
@@ -36,6 +37,7 @@ class _GraspSuccess(SuccessCondition):
 
     def _step(self, task, env, action):
         return self._is_grasping_target(env)
+
 
 class _SimpleGraspReward(BaseRewardFunction):
     """
@@ -71,11 +73,15 @@ class _SimpleGraspReward(BaseRewardFunction):
             # Still penalize collisions even if object is missing
             coll = detect_robot_collision_in_sim(robot)
             pen = (-self._collision_penalty) if coll else 0.0
-            return pen, {"grasp_success": False, "missing_object": True, "collision": bool(coll),
-                         "collision_penalty": pen}
+            return pen, {
+                "grasp_success": False,
+                "missing_object": True,
+                "collision": bool(coll),
+                "collision_penalty": pen,
+            }
 
         eef = self._eef_pos(env)
-        obj_center = th.as_tensor(obj.get_position_orientation()[0], dtype=th.float32) # TODO check circumference
+        obj_center = th.as_tensor(obj.get_position_orientation()[0], dtype=th.float32)  # TODO check circumference
 
         grasping = self._is_grasping(robot, obj)
         if grasping:
@@ -89,8 +95,13 @@ class _SimpleGraspReward(BaseRewardFunction):
         robot = env.robots[0]
         coll = detect_robot_collision_in_sim(robot, filter_objs=[obj])
         pen = (-self._collision_penalty) if coll else 0.0
-        return shaped + pen, {"grasp_success": False, "dist": float(dist), "shaping": shaped, "collision": bool(coll),
-                              "collision_penalty": pen}
+        return shaped + pen, {
+            "grasp_success": False,
+            "dist": float(dist),
+            "shaping": shaped,
+            "collision": bool(coll),
+            "collision_penalty": pen,
+        }
 
 
 class RobustGraspTask(BaseTask):
@@ -102,12 +113,12 @@ class RobustGraspTask(BaseTask):
     """
 
     def __init__(
-            self,
-            obj_name: str,
-            robot_idn: int = 0,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        obj_name: str,
+        robot_idn: int = 0,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._obj_name = obj_name
         self._robot_idn = int(robot_idn)
@@ -116,8 +127,8 @@ class RobustGraspTask(BaseTask):
     def _create_termination_conditions(self):
         return {
             "timeout": Timeout(max_steps=self._termination_config["max_steps"]),
-            "graspgoal" : _GraspSuccess(obj_name=self._obj_name),
-            "falling" : Falling(robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]),
+            "graspgoal": _GraspSuccess(obj_name=self._obj_name),
+            "falling": Falling(robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]),
         }
 
     def _create_reward_functions(self):
@@ -153,6 +164,3 @@ class RobustGraspTask(BaseTask):
     @classproperty
     def default_reward_config(cls):
         return {"dist_coeff": 0.1, "r_grasp": 1.0, "collision_penalty": 1.0}
-
-
-

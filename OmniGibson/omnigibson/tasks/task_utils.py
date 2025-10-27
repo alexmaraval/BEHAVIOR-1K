@@ -4,6 +4,7 @@ from omnigibson.termination_conditions.max_collision import MaxCollision
 from omnigibson.object_states.contact_bodies import ContactBodies
 from omnigibson.reward_functions.collision_reward import CollisionReward
 
+
 def _get_named(env, name):
     return env.scene.object_registry("name", name)
 
@@ -11,6 +12,7 @@ def _get_named(env, name):
 def _front_target(obj, offset=0.6):
     pos, quat = obj.get_position_orientation()
     return pos + T.quat_apply(quat, th.tensor([offset, 0, 0], dtype=th.float32))
+
 
 def _center_xy(obj):
     lo, hi = obj.aabb

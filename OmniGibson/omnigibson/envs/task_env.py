@@ -15,7 +15,7 @@ from omnigibson.learning.utils.eval_utils import PROPRIOCEPTION_INDICES
 from omnigibson.macros import gm
 from omnigibson.envs.env_wrapper import EnvironmentWrapper
 
-from omnigibson.learning.utils.eval_utils import (TASK_NAMES_TO_INDICES, generate_basic_environment_config)
+from omnigibson.learning.utils.eval_utils import TASK_NAMES_TO_INDICES, generate_basic_environment_config
 from gello.robots.sim_robot.og_teleop_utils import (
     augment_rooms,
     load_available_tasks,
@@ -39,7 +39,7 @@ class TaskCombination:
     """
 
     def __init__(
-            self, tasks: list, bonus_completed_subtask: float = 10.0, sparse_early_sub_goals: bool = False
+        self, tasks: list, bonus_completed_subtask: float = 10.0, sparse_early_sub_goals: bool = False
     ) -> None:
         """
         Initialize the TaskCombination with a sequence of subtasks.
@@ -105,12 +105,12 @@ class TaskEnv:
     """
 
     def __init__(
-            self,
-            config: dict[str, ...],
-            motor_type: str = "position",
-            instance_id: int | None = None,
-            max_steps: int | None = None,
-            use_domain_randomization: bool = False,
+        self,
+        config: dict[str, ...],
+        motor_type: str = "position",
+        instance_id: int | None = None,
+        max_steps: int | None = None,
+        use_domain_randomization: bool = False,
     ) -> None:
         """
         Initialize the TaskEnv environment and load all required components.
@@ -165,8 +165,7 @@ class TaskEnv:
             "left_eef_displacement": [],
             "right_eef_displacement": [],
         }
-        with open(os.path.join(gm.DATA_PATH, "2025-challenge-task-instances", "metadata", "episodes.jsonl"),
-                  "r") as f:
+        with open(os.path.join(gm.DATA_PATH, "2025-challenge-task-instances", "metadata", "episodes.jsonl"), "r") as f:
             episodes = [json.loads(line) for line in f]
 
         task_idx = TASK_NAMES_TO_INDICES[self.task_name]
@@ -206,10 +205,14 @@ class TaskEnv:
         else:
             self.max_steps = cfg["task"]["termination_config"]["max_steps"]
         if self.motor_type == "position":
-            base = {"name": "HolonomicBaseJointController", "motor_type": "position", "pos_kp": 50,
-                    "command_input_limits": None,
-                    "command_output_limits": None,
-                    "use_impedances": False}
+            base = {
+                "name": "HolonomicBaseJointController",
+                "motor_type": "position",
+                "pos_kp": 50,
+                "command_input_limits": None,
+                "command_output_limits": None,
+                "use_impedances": False,
+            }
             cfg["robots"][0]["controller_config"]["base"] = base
 
         return cfg
@@ -309,13 +312,14 @@ class TaskEnv:
         """
         self._task_stages = get_sub_tasks(task_name=self.task_name)
         self.subtasks = []
-        for sub_task_map in (self._task_stages or []):
+        for sub_task_map in self._task_stages or []:
             sub_task = sub_task_map.get("factory")
             task_obj = sub_task(termination_config={"max_steps": self.max_steps})
             task_obj.reset(self._env)
             self.subtasks.append(task_obj)
-        self.task_combo = TaskCombination(self.subtasks or [], bonus_completed_subtask=10.0,
-                                          sparse_early_sub_goals=False)
+        self.task_combo = TaskCombination(
+            self.subtasks or [], bonus_completed_subtask=10.0, sparse_early_sub_goals=False
+        )
         self._reset_subtask_progress()
 
     def reset(self) -> dict[str, ...]:
@@ -360,7 +364,7 @@ class TaskEnv:
             "success": False,
             "timeout": False,
             "falling": False,
-            "max_collision": False
+            "max_collision": False,
         }
 
         if self.task_combo is not None and self.subtasks:
@@ -392,7 +396,7 @@ class TaskEnv:
                 success=success,
                 timeout=False if success else timeout,
                 falling=False if success else falling,
-                max_collision=False if success else max_collision
+                max_collision=False if success else max_collision,
             )
 
             if combo_done:
@@ -516,12 +520,14 @@ def build_transform(theta, pos_xy, z=0.0) -> np.ndarray:
         A 4×4 homogeneous transformation matrix
 
     """
-    return np.array([
-        [np.cos(theta), -np.sin(theta), 0, pos_xy[0]],
-        [np.sin(theta), np.cos(theta), 0, pos_xy[1]],
-        [0, 0, 1, z],
-        [0, 0, 0, 1]
-    ])
+    return np.array(
+        [
+            [np.cos(theta), -np.sin(theta), 0, pos_xy[0]],
+            [np.sin(theta), np.cos(theta), 0, pos_xy[1]],
+            [0, 0, 1, z],
+            [0, 0, 0, 1],
+        ]
+    )
 
 
 def get_transformed_action(row, base_pos, yaw2d) -> np.ndarray:
@@ -636,9 +642,7 @@ if __name__ == "__main__":
     stages = get_sub_tasks(task_name=config.task.name)
 
     # --- Loop over episodes ---
-    for ep_idx, parquet_path in enumerate(
-            tqdm(parquet_files, desc="Episodes", unit="episode"), start=1
-    ):
+    for ep_idx, parquet_path in enumerate(tqdm(parquet_files, desc="Episodes", unit="episode"), start=1):
         instance_id = int((int(parquet_path.stem.split("_")[-1]) // 10) % 1e3)
 
         # Re-use environment

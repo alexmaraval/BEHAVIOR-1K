@@ -63,11 +63,11 @@ class NormalizedPotentialReward(BaseRewardFunction):
         prog = 1.0 - min(1.0, phi / self._phi0)
         r = (prog - self._prev) * self._r_potential
         self._prev = prog
-        return r , {}
+        return r, {}
 
 
 class GraspWithOffsetReward(BaseRewardFunction):
-    def __init__(self, r_offset=0.0, transform="tanh",k=1.0, **grasp_kwargs):
+    def __init__(self, r_offset=0.0, transform="tanh", k=1.0, **grasp_kwargs):
         self._inner = GraspReward(**grasp_kwargs)
         self._r_offset = r_offset
         self._transform = transform
@@ -94,25 +94,28 @@ class SuccessBonusReward(BaseRewardFunction):
         self._succ = success_condition
         self._r = float(r_success)
         super().__init__()
+
     def reset(self, task, env):
         pass
+
     def _step(self, task, env, action):
         return (self._r if self._succ.success else 0.0), {}
 
+
 class MoveBaseToObjectTask(PointNavigationTask):
     def __init__(
-            self,
-            target_object_name: str,
-            front_offset: float = 0.0,
-            robot_idn: int = 0,
-            goal_tolerance: float = 1.5,
-            reward_type: str = "l2",
-            max_steps: int | None = None,
-            visualize_goal: bool = False,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = True,
-            **kwargs,
+        self,
+        target_object_name: str,
+        front_offset: float = 0.0,
+        robot_idn: int = 0,
+        goal_tolerance: float = 1.5,
+        reward_type: str = "l2",
+        max_steps: int | None = None,
+        visualize_goal: bool = False,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = True,
+        **kwargs,
     ):
         self._target_object_name = target_object_name
         self._front_offset = front_offset
@@ -159,17 +162,17 @@ class MoveBaseToObjectTask(PointNavigationTask):
 
 class MoveEEToObjectTask(PointReachingTask):
     def __init__(
-            self,
-            target_object_name: str,
-            front_offset: float = 0.0,
-            robot_idn: int = 0,
-            goal_tolerance: float = 0.04,
-            max_steps: int | None = None,
-            visualize_goal: bool = False,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = True,
-            **kwargs,
+        self,
+        target_object_name: str,
+        front_offset: float = 0.0,
+        robot_idn: int = 0,
+        goal_tolerance: float = 0.04,
+        max_steps: int | None = None,
+        visualize_goal: bool = False,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = True,
+        **kwargs,
     ):
         self._target_object_name = target_object_name
         self._front_offset = front_offset
@@ -178,7 +181,6 @@ class MoveEEToObjectTask(PointReachingTask):
         term_cfg = dict(termination_config or {})
         if max_steps is not None:
             term_cfg["max_steps"] = max_steps
-
 
         # Initialize the navigation task
         super().__init__(
@@ -288,13 +290,13 @@ class MoveEEToObjectTask(PointReachingTask):
 
 class _PredicateToggleTask(BaseTask):
     def __init__(
-            self,
-            target_object_name: str,
-            desired_predicate: str,
-            desired_value: bool,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        desired_predicate: str,
+        desired_value: bool,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._target_object_name = target_object_name
         self._pred = desired_predicate.lower()
@@ -385,10 +387,12 @@ class _PredicateToggleTask(BaseTask):
     @classproperty
     def default_reward_config(cls):
         base = {}
-        base.update({
-            "r_offset": 0.0,
-            "use_normalized_potential": False,
-        })
+        base.update(
+            {
+                "r_offset": 0.0,
+                "use_normalized_potential": False,
+            }
+        )
         return base
 
 
@@ -405,6 +409,7 @@ class OpenTask(_PredicateToggleTask):
 class CloseTask(_PredicateToggleTask):
     def __init__(self, target_object_name: str, **kwargs):
         super().__init__(target_object_name=target_object_name, desired_predicate="open", desired_value=False, **kwargs)
+
 
 class GraspGoal(SuccessCondition):
     """
@@ -433,12 +438,14 @@ class GraspGoal(SuccessCondition):
             pass
         return False
 
+
 class DeltaOfInnerReward(BaseRewardFunction):
     """
     Wraps an inner reward function and returns its per-step delta:
     r_delta_t = (r_raw_t - r_raw_{t-1}) * scale
     First step returns 0. Optionally clips the delta.
     """
+
     def __init__(self, inner, scale=1.0, clip_abs=0.0):
         self._inner = inner
         self._scale = float(scale)
@@ -466,16 +473,16 @@ class DeltaOfInnerReward(BaseRewardFunction):
         info["grasp_delta"] = r_delta
         return r_delta, info
 
-class RobustGraspTask(GraspTask):
 
+class RobustGraspTask(GraspTask):
     def __init__(
-            self,
-            obj_name: str,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
-            precached_reset_pose_path=None,
-            objects_config=None,
+        self,
+        obj_name: str,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
+        precached_reset_pose_path=None,
+        objects_config=None,
     ):
         self._obj_name = obj_name
 
@@ -506,7 +513,6 @@ class RobustGraspTask(GraspTask):
 
         cfg = {k: self._reward_config[k] for k in allowed if k in self._reward_config}
 
-
         inner = GraspReward(obj_name=self._obj_name, **cfg)
 
         # Wrap to return per-step delta, with optional scale / clip
@@ -526,24 +532,25 @@ class RobustGraspTask(GraspTask):
     @classproperty
     def default_reward_config(cls):
         base = dict(super(RobustGraspTask, cls).default_reward_config)
-        base.update({
-            "r_offset": 0.0,
-            "use_normalized_potential": False,
-        })
+        base.update(
+            {
+                "r_offset": 0.0,
+                "use_normalized_potential": False,
+            }
+        )
         return base
 
 
 class _RelativeStatusTask(BaseTask):
-
     def __init__(
-            self,
-            target_object_name: str,
-            source_object_name: str,
-            desired_predicate: str,
-            desired_value: bool,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        source_object_name: str,
+        desired_predicate: str,
+        desired_value: bool,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._target_object_name = target_object_name
         self._source_object_name = source_object_name
@@ -761,10 +768,10 @@ def _joint_open_metrics(joint, direction):
 
 
 def _is_closed_le_angle(
-        obj,
-        max_deg: float = 5.0,
-        max_frac: float = 0.1,
-        require_all: bool = True,
+    obj,
+    max_deg: float = 5.0,
+    max_frac: float = 0.1,
+    require_all: bool = True,
 ) -> bool:
     """
     Return True if the door is sufficiently closed:
@@ -780,7 +787,7 @@ def _is_closed_le_angle(
         if j.joint_type == JointType.JOINT_REVOLUTE:
             closed_ok = (opened <= angle_tol) or (total > 1e-6 and frac <= max_frac)
         else:
-            closed_ok = (total > 1e-6 and frac <= max_frac)
+            closed_ok = total > 1e-6 and frac <= max_frac
         results.append(closed_ok)
 
     return all(results) if require_all else any(results)
@@ -823,14 +830,16 @@ def _open_angles(obj):
         angle_deg = math.degrees(opened) if j.joint_type == JointType.JOINT_REVOLUTE else 0.0
         if j.joint_type == JointType.JOINT_REVOLUTE:
             max_angle_deg = max(max_angle_deg, angle_deg)
-        per_joint.append({
-            "name": nm,
-            "type": j.joint_type,
-            "opened": opened,
-            "total": total,
-            "fraction": frac,
-            "angle_deg": angle_deg,
-        })
+        per_joint.append(
+            {
+                "name": nm,
+                "type": j.joint_type,
+                "opened": opened,
+                "total": total,
+                "fraction": frac,
+                "angle_deg": angle_deg,
+            }
+        )
 
     return {"max_angle_deg": max_angle_deg, "per_joint": per_joint}
 
@@ -850,14 +859,14 @@ class SufficientlyOpenTask(BaseTask):
     """
 
     def __init__(
-            self,
-            target_object_name: str,
-            allowed_deg: float = 90.0,
-            allowed_frac: float = 0.8,
-            status: str = "open",
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        allowed_deg: float = 90.0,
+        allowed_frac: float = 0.8,
+        status: str = "open",
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._target = target_object_name
         self._allowed_deg = float(allowed_deg)
@@ -974,12 +983,7 @@ class SufficientlyOpenTask(BaseTask):
 
     @classproperty
     def default_reward_config(cls):
-        return {
-            "r_scale": 1.0,
-            "r_success": 10.0,
-            "r_clip_abs": 0.0,
-            "r_offset": 0.0
-        }
+        return {"r_scale": 1.0, "r_success": 10.0, "r_clip_abs": 0.0, "r_offset": 0.0}
 
 
 class SufficientlyClosedTask(SufficientlyOpenTask):
@@ -991,17 +995,17 @@ class SufficientlyClosedTask(SufficientlyOpenTask):
         termination_config=None,
         reward_config=None,
         include_obs: bool = False,
-        ):
+    ):
         super().__init__(
-        target_object_name=target_object_name,
-        allowed_deg=allowed_deg,
-        allowed_frac=allowed_frac,
-        status="closed",
-        termination_config=termination_config,
-        reward_config=reward_config,
-        include_obs=include_obs,
+            target_object_name=target_object_name,
+            allowed_deg=allowed_deg,
+            allowed_frac=allowed_frac,
+            status="closed",
+            termination_config=termination_config,
+            reward_config=reward_config,
+            include_obs=include_obs,
         )
-        self._prev_progress = None # track previous closed progress
+        self._prev_progress = None  # track previous closed progress
 
     def reset(self, env):
         super().reset(env)
@@ -1071,13 +1075,13 @@ class SufficientlyClosedTask_(SufficientlyOpenTask):
     """
 
     def __init__(
-            self,
-            target_object_name: str,
-            allowed_deg: float = 5.0,
-            allowed_frac: float = 0.1,
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        allowed_deg: float = 5.0,
+        allowed_frac: float = 0.1,
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._prev_closed_progress = 0
         super().__init__(
@@ -1160,14 +1164,14 @@ def _center_xy(obj):
 
 class OnTopStableTask(BaseTask):
     def __init__(
-            self,
-            target_object_name: str,
-            source_object_name: str,
-            xy_tol: float = 0.23,  # center alignment tolerance
-            require_release: bool = True,  # must not be grasped by robot
-            termination_config=None,
-            reward_config=None,
-            include_obs: bool = False,
+        self,
+        target_object_name: str,
+        source_object_name: str,
+        xy_tol: float = 0.23,  # center alignment tolerance
+        require_release: bool = True,  # must not be grasped by robot
+        termination_config=None,
+        reward_config=None,
+        include_obs: bool = False,
     ):
         self._tgt = target_object_name
         self._src = source_object_name
@@ -1199,10 +1203,12 @@ class OnTopStableTask(BaseTask):
     @classproperty
     def default_reward_config(cls):
         base = {}
-        base.update({
-            "r_offset": 1.0,
-            "use_normalized_potential": False,
-        })
+        base.update(
+            {
+                "r_offset": 1.0,
+                "use_normalized_potential": False,
+            }
+        )
         return base
 
     def reset(self, env):
@@ -1223,7 +1229,7 @@ class OnTopStableTask(BaseTask):
             xy_err = float(th.norm(_center_xy(tgt) - _center_xy(src)))
         except Exception:
             xy_err = 1e9
-        aligned = (xy_err <= self._xy_tol)
+        aligned = xy_err <= self._xy_tol
 
         released = True
         if self._require_release and IsGrasping in tgt.states:
@@ -1240,8 +1246,9 @@ class OnTopStableTask(BaseTask):
             return 1.0, True, info
 
         # Allow timeout
-        base_done, base_info = super()._step_termination(env=env, action=action, info={
-            "done": {"success": False, "termination_conditions": {}}})
+        base_done, base_info = super()._step_termination(
+            env=env, action=action, info={"done": {"success": False, "termination_conditions": {}}}
+        )
         tc = dict(base_info.get("done", {}).get("termination_conditions", {}))
         for k, v in list(tc.items()):
             if not isinstance(v, dict):

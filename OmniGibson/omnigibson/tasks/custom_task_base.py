@@ -33,7 +33,7 @@ class BaseTask(GymObservable, Registerable, metaclass=ABCMeta):
         # found in the default config should raise an error
         unknown_termination_keys = set(termination_config.keys()) - set(self.default_termination_config.keys())
         assert (
-                len(unknown_termination_keys) == 0
+            len(unknown_termination_keys) == 0
         ), f"Got unknown termination config keys inputted: {unknown_termination_keys}"
         unknown_reward_keys = set(reward_config.keys()) - set(self.default_reward_config.keys())
         assert len(unknown_reward_keys) == 0, f"Got unknown reward config keys inputted: {unknown_reward_keys}"
@@ -62,7 +62,6 @@ class BaseTask(GymObservable, Registerable, metaclass=ABCMeta):
         super().__init__()
 
     def _load_observation_space(self):
-
         return {}
 
     @abstractmethod

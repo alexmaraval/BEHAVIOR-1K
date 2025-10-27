@@ -91,8 +91,15 @@ move_to_counter_top = partial(
     goal_tolerance=1,
     termination_config={"max_steps": 10000},
     include_obs=False,
-    skip_collision_with_objs=[name_tray, name_bacon_1, name_bacon_2, name_bacon_3, name_bacon_4, name_bacon_5,
-                              name_bacon_6],
+    skip_collision_with_objs=[
+        name_tray,
+        name_bacon_1,
+        name_bacon_2,
+        name_bacon_3,
+        name_bacon_4,
+        name_bacon_5,
+        name_bacon_6,
+    ],
 )
 
 place_next_to_burner = partial(
