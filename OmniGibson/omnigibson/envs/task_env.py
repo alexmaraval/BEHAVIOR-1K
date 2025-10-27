@@ -183,7 +183,6 @@ class TaskEnv:
         # Load the seed instance by default
         available_tasks = load_available_tasks()
         task_cfg = available_tasks[self.task_name][0]
-          # cfg.robot.type TODO
         cfg = generate_basic_environment_config(task_name=self.task_name, task_cfg=task_cfg)
 
         relevant_rooms = get_task_relevant_room_types(activity_name=self.task_name)
