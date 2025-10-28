@@ -5,9 +5,6 @@ from omnigibson.tasks.task_utils import _get_named, _front_target
 from omnigibson.termination_conditions.point_goal import PointGoal
 from omnigibson.termination_conditions.termination_condition_base import SuccessCondition
 
-# Valid point navigation reward types
-POINT_NAVIGATION_REWARD_TYPES = {"l2", "geodesic"}
-
 
 class EEFsReachingTask(BaseNavigationTask):
     """
@@ -16,27 +13,13 @@ class EEFsReachingTask(BaseNavigationTask):
 
     Args:
         robot_idn (int): Which robot that this task corresponds to
-        floor (int): Which floor to navigate on
-        initial_pos (None or 3-array): If specified, should be (x,y,z) global initial position to place the robot
-            at the start of each task episode. If None, a collision-free value will be randomly sampled
-        initial_quat (None or 3-array): If specified, should be (r,p,y) global euler orientation to place the robot
-            at the start of each task episode. If None, a value will be randomly sampled about the z-axis
+        floor (int): Which floor to navigate on.
         goal_pos (None or 3-array): If specified, should be (x,y,z) global goal position to reach for the given task
             episode. If None, a collision-free value will be randomly sampled
         goal_tolerance (float): Distance between goal position and current position below which is considered a task
             success
-        goal_in_polar (bool): Whether to represent the goal in polar coordinates or not when capturing task observations
         path_range (None or 2-array): If specified, should be (min, max) values representing the range of valid
             total path lengths that are valid when sampling initial / goal positions
-        height_range (None or 2-array): If specified, should be (min, max) values representing the range of valid
-            total heights that are valid when sampling goal positions
-        visualize_goal (bool): Whether to visualize the initial / goal locations
-        visualize_path (bool): Whether to visualize the path from initial to goal location, as represented by
-            discrete waypoints
-        goal_height (float): If visualizing, specifies the height of the visual goals (m)
-        waypoint_height (float): If visualizing, specifies the height of the visual waypoints (m)
-        waypoint_width (float): If visualizing, specifies the width of the visual waypoints (m)
-        n_vis_waypoints (int): If visualizing, specifies the number of waypoints to generate
         termination_config (None or dict): Keyword-mapped configuration to use to generate termination conditions. This
             should be specific to the task class. Default is None, which corresponds to a default config being usd.
             Note that any keyword required by a specific task class but not specified in the config will automatically
@@ -45,7 +28,6 @@ class EEFsReachingTask(BaseNavigationTask):
             specific to the task class. Default is None, which corresponds to a default config being usd. Note that
             any keyword required by a specific task class but not specified in the config will automatically be filled
             in with the default config. See cls.default_reward_config for default values used
-        include_obs (bool): Whether to include observations or not for this task
     """
 
     def __init__(
@@ -53,19 +35,11 @@ class EEFsReachingTask(BaseNavigationTask):
         target_object_name: str,
         robot_idn=0,
         floor=0,
-        initial_pos=None,
-        initial_quat=None,
         goal_pos=None,
         goal_tolerance=0.1,
-        goal_in_polar=False,
         path_range=None,
-        goal_height=0.06,
-        waypoint_height=0.05,
-        waypoint_width=0.1,
-        n_vis_waypoints=10,
         reward_config=None,
         termination_config=None,
-        include_obs=True,
         skip_collision_with_objs=None,
     ):
         # Run super
@@ -73,20 +47,12 @@ class EEFsReachingTask(BaseNavigationTask):
             target_object_name=target_object_name,
             robot_idn=robot_idn,
             floor=floor,
-            initial_pos=initial_pos,
-            initial_quat=initial_quat,
             goal_pos=goal_pos,
             goal_tolerance=goal_tolerance,
-            goal_in_polar=goal_in_polar,
             path_range=path_range,
-            goal_height=goal_height,
-            waypoint_height=waypoint_height,
-            waypoint_width=waypoint_width,
-            n_vis_waypoints=n_vis_waypoints,
             reward_type="l2",  # Must use l2 for reaching task
             reward_config=reward_config,
             termination_config=termination_config,
-            include_obs=include_obs,
             skip_collision_with_objs=skip_collision_with_objs,
         )
 
@@ -108,26 +74,6 @@ class EEFsReachingTask(BaseNavigationTask):
         # Distance calculated from robot EEF, not base!
         return T.l2_distance(env.robots[self._robot_idn].get_eef_position(), self._goal_pos)
 
-    def _get_obs(self, env):
-        # Get obs from super
-        low_dim_obs, obs = super()._get_obs(env=env)
-
-        # Remove xy-pos and replace with full xyz relative distance between current and goal pos
-        low_dim_obs.pop("xy_pos_to_goal")
-        low_dim_obs["eef_to_goal"] = self._global_pos_to_robot_frame(env=env, pos=self._goal_pos)
-
-        # Add local eef position as well
-        low_dim_obs["eef_local_pos"] = self._global_pos_to_robot_frame(
-            env=env, pos=env.robots[self._robot_idn].get_eef_position()
-        )
-
-        return low_dim_obs, obs
-
-    def get_current_pos(self, env):
-        # Current position is the robot's EEF, not base!
-        return env.robots[self._robot_idn].get_eef_position()
-
-
 class MoveEEToObjectTask(EEFsReachingTask):
     def __init__(
         self,
@@ -138,7 +84,6 @@ class MoveEEToObjectTask(EEFsReachingTask):
         max_steps: int | None = None,
         termination_config=None,
         reward_config=None,
-        include_obs: bool = True,
         **kwargs,
     ):
         self._front_offset = front_offset
@@ -155,7 +100,6 @@ class MoveEEToObjectTask(EEFsReachingTask):
             goal_tolerance=goal_tolerance,
             termination_config=term_cfg,
             reward_config=reward_config,
-            include_obs=include_obs,
             **kwargs,
         )
 

@@ -18,7 +18,6 @@ class _PredicateToggleTask(BaseTask):
         desired_value: bool,
         termination_config=None,
         reward_config=None,
-        include_obs: bool = False,
     ):
         self._target_object_name = target_object_name
         self._pred = desired_predicate.lower()
@@ -27,16 +26,13 @@ class _PredicateToggleTask(BaseTask):
         term_cfg = dict(termination_config or {})
         term_cfg.setdefault("max_steps", 4000)
 
-        super().__init__(termination_config=term_cfg, reward_config=reward_config, include_obs=include_obs)
+        super().__init__(termination_config=term_cfg, reward_config=reward_config)
 
     def _create_termination_conditions(self):
         return {"timeout": Timeout(max_steps=self._termination_config["max_steps"])}
 
     def _create_reward_functions(self):
         return {}
-
-    def _get_obs(self, env):
-        return {}, {}
 
     @classproperty
     def default_termination_config(cls):
@@ -88,25 +84,6 @@ class _PredicateToggleTask(BaseTask):
         reward = self._reward_config.get("r_offset", 0.0)
         return reward, done_out, info
 
-    @classproperty
-    def default_termination_config(cls):
-        return {"max_steps": 2000}
-
-    @classproperty
-    def default_reward_config(cls):
-        return {}
-
-    @classproperty
-    def default_reward_config(cls):
-        base = {}
-        base.update(
-            {
-                "r_offset": 0.0,
-                "use_normalized_potential": False,
-            }
-        )
-        return base
-
 
 class OnTask(_PredicateToggleTask):
     def __init__(self, target_object_name: str, **kwargs):
@@ -132,7 +109,6 @@ class _RelativeStatusTask(BaseTask):
         desired_value: bool,
         termination_config=None,
         reward_config=None,
-        include_obs: bool = False,
     ):
         self._target_object_name = target_object_name
         self._source_object_name = source_object_name
@@ -141,16 +117,13 @@ class _RelativeStatusTask(BaseTask):
 
         term_cfg = dict(termination_config or {})
         term_cfg.setdefault("max_steps", 4000)
-        super().__init__(termination_config=term_cfg, reward_config=reward_config or {}, include_obs=include_obs)
+        super().__init__(termination_config=term_cfg, reward_config=reward_config or {})
 
     def _create_termination_conditions(self):
         return {"timeout": Timeout(max_steps=self._termination_config["max_steps"])}
 
     def _create_reward_functions(self):
         return {}
-
-    def _get_obs(self, env):
-        return {}, {}
 
     @classproperty
     def default_termination_config(cls):
@@ -171,6 +144,7 @@ class _RelativeStatusTask(BaseTask):
         if self._pred == "on_top" and OnTop in a.states:
             return a.states[OnTop].get_value(b)
         return None
+
 
     def step(self, env, action):
         info = {"done": {"success": False, "termination_conditions": {}}}
@@ -252,7 +226,6 @@ class OnTopStableTask(BaseTask):
         require_release: bool = True,  # must not be grasped by robot
         termination_config=None,
         reward_config=None,
-        include_obs: bool = False,
     ):
         self._tgt = target_object_name
         self._src = source_object_name
@@ -261,7 +234,7 @@ class OnTopStableTask(BaseTask):
         self._grasping_arm = None
         term_cfg = termination_config or {}
         term_cfg.setdefault("max_steps", 4000)
-        super().__init__(termination_config=term_cfg, reward_config=reward_config or {}, include_obs=include_obs)
+        super().__init__(termination_config=term_cfg, reward_config=reward_config or {})
 
     def _create_termination_conditions(self):
         return {"timeout": Timeout(max_steps=self._termination_config["max_steps"])}
@@ -269,8 +242,6 @@ class OnTopStableTask(BaseTask):
     def _create_reward_functions(self):
         return {}
 
-    def _get_obs(self, env):
-        return {}, {}
 
     @classproperty
     def default_termination_config(cls):
@@ -278,14 +249,7 @@ class OnTopStableTask(BaseTask):
 
     @classproperty
     def default_reward_config(cls):
-        base = {}
-        base.update(
-            {
-                "r_offset": 1.0,
-                "use_normalized_potential": False,
-            }
-        )
-        return base
+        return {}
 
     def reset(self, env):
         super().reset(env)

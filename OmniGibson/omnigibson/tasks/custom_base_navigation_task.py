@@ -21,26 +21,16 @@ class BaseNavigationTask(BaseTask):
     The task is to navigate to a goal position
 
     Args:
+        target_object_name: Target object name.
+        front_offset: Front offset to calculate the goal position.
         robot_idn (int): Which robot that this task corresponds to
         floor (int): Which floor to navigate on
-        initial_pos (None or 3-array): If specified, should be (x,y,z) global initial position to place the robot
-            at the start of each task episode. If None, a collision-free value will be randomly sampled
-        initial_quat (None or 4-array): If specified, should be (x,y,z,w) global quaternion orientation to place the
-            robot at the start of each task episode. If None, a value will be randomly sampled about the z-axis
         goal_pos (None or 3-array): If specified, should be (x,y,z) global goal position to reach for the given task
             episode. If None, a collision-free value will be randomly sampled
         goal_tolerance (float): Distance between goal position and current position below which is considered a task
             success
-        goal_in_polar (bool): Whether to represent the goal in polar coordinates or not when capturing task observations
         path_range (None or 2-array): If specified, should be (min, max) values representing the range of valid
             total path lengths that are valid when sampling initial / goal positions
-        visualize_goal (bool): Whether to visualize the initial / goal locations
-        visualize_path (bool): Whether to visualize the path from initial to goal location, as represented by
-            discrete waypoints
-        goal_height (float): If visualizing, specifies the height of the visual goals (m)
-        waypoint_height (float): If visualizing, specifies the height of the visual waypoints (m)
-        waypoint_width (float): If visualizing, specifies the width of the visual waypoints (m)
-        n_vis_waypoints (int): If visualizing, specifies the number of waypoints to generate
         reward_type (str): Type of reward to use. Valid options are: {"l2", "geodesic"}
         termination_config (None or dict): Keyword-mapped configuration to use to generate termination conditions. This
             should be specific to the task class. Default is None, which corresponds to a default config being usd.
@@ -50,7 +40,6 @@ class BaseNavigationTask(BaseTask):
             specific to the task class. Default is None, which corresponds to a default config being usd. Note that
             any keyword required by a specific task class but not specified in the config will automatically be filled
             in with the default config. See cls.default_reward_config for default values used
-        include_obs (bool): Whether to include observations or not for this task
     """
 
     def __init__(
@@ -59,22 +48,12 @@ class BaseNavigationTask(BaseTask):
         front_offset: float = 0.0,
         robot_idn=0,
         floor=0,
-        initial_pos=None,
-        initial_quat=None,
         goal_pos=None,
         goal_tolerance=0.5,
-        goal_in_polar=False,
         path_range=None,
-        visualize_goal=False,
-        visualize_path=False,
-        goal_height=0.06,
-        waypoint_height=0.05,
-        waypoint_width=0.1,
-        n_vis_waypoints=10,
         reward_type="l2",
         termination_config=None,
         reward_config=None,
-        include_obs=True,
         skip_collision_with_objs=None,
     ):
         # Store inputs
@@ -82,37 +61,23 @@ class BaseNavigationTask(BaseTask):
         self._front_offset = front_offset
         self._robot_idn = robot_idn
         self._floor = floor
-        self._initial_pos = initial_pos if initial_pos is None else th.tensor(initial_pos)
-        self._initial_quat = initial_quat if initial_quat is None else th.tensor(initial_quat)
         self._goal_pos = goal_pos if goal_pos is None else th.tensor(goal_pos)
         self._goal_tolerance = goal_tolerance
-        self._goal_in_polar = goal_in_polar
         self._path_range = path_range
-        self._randomize_initial_pos = initial_pos is None
-        self._randomize_initial_quat = initial_quat is None
-        self._randomize_goal_pos = goal_pos is None
-        self._visualize_goal = visualize_goal
-        self._visualize_path = visualize_path
-        self._goal_height = goal_height
-        self._waypoint_height = waypoint_height
-        self._waypoint_width = waypoint_width
-        self._n_vis_waypoints = n_vis_waypoints
         assert_valid_key(key=reward_type, valid_keys=POINT_NAVIGATION_REWARD_TYPES, name="reward type")
         self._reward_type = reward_type
+
         # Collision-skip support: store names and resolved objects
         self._skip_collision_with_objs_names = skip_collision_with_objs
         self.skip_collision_objs = []
 
         # Create other attributes that will be filled in at runtime
-        self._initial_pos_marker = None
-        self._goal_pos_marker = None
-        self._waypoint_markers = None
         self._path_length = None
         self._current_robot_pos = None
         self._geodesic_dist = None
 
         # Run super
-        super().__init__(termination_config=termination_config, reward_config=reward_config, include_obs=include_obs)
+        super().__init__(termination_config=termination_config, reward_config=reward_config)
 
     def _create_termination_conditions(self):
         # Initialize termination conditions dict and fill in with MaxCollision, Timeout, Falling, and PointGoal
@@ -222,7 +187,6 @@ class BaseNavigationTask(BaseTask):
         # Store only the position tensor (x,y,z), not the full (pos, quat) tuple
         self._geodesic_dist = self._get_geodesic_potential(env)
 
-        self._randomize_goal_pos = False
         # Resolve skip-collision objects by name
         self.skip_collision_objs = []
         if self._skip_collision_with_objs_names:
@@ -247,26 +211,6 @@ class BaseNavigationTask(BaseTask):
         delta_pos_global = pos - env.robots[self._robot_idn].states[Pose].get_value()[0]
         return T.quat2mat(env.robots[self._robot_idn].states[Pose].get_value()[1]).T @ delta_pos_global
 
-    def _get_obs(self, env):
-        # Get relative position of goal with respect to the current agent position
-        xy_pos_to_goal = self._global_pos_to_robot_frame(env, self._goal_pos)[:2]
-        if self._goal_in_polar:
-            xy_pos_to_goal = th.tensor(T.cartesian_to_polar(*xy_pos_to_goal))
-
-        # linear velocity and angular velocity
-        ori_t = T.quat2mat(env.robots[self._robot_idn].states[Pose].get_value()[1]).T
-        lin_vel = ori_t @ env.robots[self._robot_idn].get_linear_velocity()
-        ang_vel = ori_t @ env.robots[self._robot_idn].get_angular_velocity()
-
-        # Compose observation dict
-        low_dim_obs = dict(
-            xy_pos_to_goal=xy_pos_to_goal,
-            robot_lin_vel=lin_vel,
-            robot_ang_vel=ang_vel,
-        )
-
-        # We have no non-low-dim obs, so return empty dict for those
-        return low_dim_obs, dict()
 
     def get_goal_pos(self):
         """

@@ -1,5 +1,6 @@
 from functools import partial
 
+import numpy as np
 from omnigibson.tasks.custom_base_navigation_task import BaseNavigationTask
 from omnigibson.tasks.custom_grasp_task import RobustGraspTask
 from omnigibson.tasks.custom_open_close_task import SufficientlyClosedTask, SufficientlyOpenTask
@@ -16,28 +17,33 @@ def get_sub_tasks(task_name: str) -> list[dict[str, ...]]:
 
 
 # -----turning_on_radio-----
+
 name_radio = "radio_89"
 name_coffe_table = "coffee_table_koagbh_0"
+# radio_handle_transform = np.array(
+#     [[0.25, 0.43, 0.042],
+#      [0.41, 0.68, 0.067],
+#      [0.050, 0.084, 0.0083]]
+# )
+radio_handle_transform = None
 
 move_to_radio = partial(
     BaseNavigationTask,
     target_object_name=name_radio,
     goal_tolerance=1,
     termination_config={"max_steps": 5000},
-    include_obs=False,
 )
 
 grasp_radio = partial(
     RobustGraspTask,
     obj_name=name_radio,
     termination_config={"max_steps": 5000},
-    include_obs=False,
+    transform_matrix=radio_handle_transform,
 )
 
 radio_on = partial(
     OnTask,
     target_object_name=name_radio,
-    include_obs=False,
 )
 
 stages = [
@@ -66,7 +72,6 @@ move_to_fridge = partial(
     target_object_name=name_fridge,
     goal_tolerance=1.3,
     termination_config={"max_steps": 10000},
-    include_obs=False,
 )
 
 open_fridge = partial(
@@ -74,7 +79,6 @@ open_fridge = partial(
     target_object_name=name_fridge,
     allowed_deg=80,
     termination_config={"max_steps": 10000},
-    include_obs=False,
 )
 
 close_fridge = partial(
@@ -82,7 +86,6 @@ close_fridge = partial(
     target_object_name=name_fridge,
     allowed_deg=0,
     termination_config={"max_steps": 10000},
-    include_obs=False,
 )
 
 move_to_counter_top = partial(
@@ -90,7 +93,6 @@ move_to_counter_top = partial(
     target_object_name=name_countertop,
     goal_tolerance=1,
     termination_config={"max_steps": 10000},
-    include_obs=False,
     skip_collision_with_objs=[
         name_tray,
         name_bacon_1,
@@ -107,9 +109,7 @@ place_next_to_burner = partial(
     target_object_name=name_tray,
     source_object_name=name_burner,
     desired_value=True,
-    # reward_config=reward_config,
     termination_config={"max_steps": 10000},
-    include_obs=False,
 )
 
 move_to_frying_pan = partial(
@@ -117,7 +117,6 @@ move_to_frying_pan = partial(
     target_object_name=name_pan,
     goal_tolerance=0.05,
     termination_config={"max_steps": 10000},
-    include_obs=False,
     skip_collision_with_objs=[name_pan],
 )
 
@@ -126,7 +125,6 @@ move_to_tray = partial(
     target_object_name=name_tray,
     goal_tolerance=0.05,
     termination_config={"max_steps": 10000},
-    include_obs=False,
     skip_collision_with_objs=[name_tray],
 )
 
@@ -135,14 +133,12 @@ place_frying_pan = partial(
     target_object_name=name_burner,
     source_object_name=name_pan,
     termination_config={"max_steps": 10000},
-    include_obs=False,
 )
 
 burner_on = partial(
     OnTask,
     target_object_name=name_burner,
     termination_config={"max_steps": 10000},
-    include_obs=False,
 )
 
 pour_tray = partial(
@@ -151,21 +147,18 @@ pour_tray = partial(
     source_object_name=name_pan,
     desired_value=True,
     termination_config={"max_steps": 10000},
-    include_obs=False,
 )
 
 grasp_tray = partial(
     RobustGraspTask,
     obj_name=name_tray,
     termination_config={"max_steps": 10000},
-    include_obs=False,
 )
 
 grasp_pan = partial(
     RobustGraspTask,
     obj_name=name_pan,
     termination_config={"max_steps": 10000},
-    include_obs=False,
 )
 
 stages = [

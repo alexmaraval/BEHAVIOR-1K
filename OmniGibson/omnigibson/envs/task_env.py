@@ -2,15 +2,18 @@ import json
 import os
 import random
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import math
 import numpy as np
 import torch as th
+import cv2
 
 sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
 
 import omnigibson as og
+import omnigibson.utils.transform_utils as T
 from omnigibson.learning.utils.eval_utils import PROPRIOCEPTION_INDICES
 from omnigibson.macros import gm
 from omnigibson.envs.env_wrapper import EnvironmentWrapper
@@ -28,6 +31,19 @@ from omnigibson.tasks.task_factory import get_sub_tasks
 from omnigibson.robots import BaseRobot
 from rich.table import Table
 
+from omnigibson.learning.utils.eval_utils import (
+    ROBOT_CAMERA_NAMES,
+    PROPRIOCEPTION_INDICES,
+    generate_basic_environment_config,
+    flatten_obs_dict,
+    TASK_NAMES_TO_INDICES,
+)
+
+from omnigibson.learning.utils.obs_utils import (
+    create_video_writer,
+    write_video,
+)
+
 gm.ENABLE_FLATCACHE = True
 gm.USE_GPU_DYNAMICS = False
 gm.ENABLE_TRANSITION_RULES = True
@@ -39,7 +55,7 @@ class TaskCombination:
     """
 
     def __init__(
-        self, tasks: list, bonus_completed_subtask: float = 10.0, sparse_early_sub_goals: bool = False
+            self, tasks: list, bonus_completed_subtask: float = 10.0, sparse_early_sub_goals: bool = False
     ) -> None:
         """
         Initialize the TaskCombination with a sequence of subtasks.
@@ -105,12 +121,12 @@ class TaskEnv:
     """
 
     def __init__(
-        self,
-        config: dict[str, ...],
-        motor_type: str = "position",
-        instance_id: int | None = None,
-        max_steps: int | None = None,
-        use_domain_randomization: bool = False,
+            self,
+            config: dict[str, ...],
+            motor_type: str = "position",
+            instance_id: int | None = None,
+            max_steps: int | None = None,
+            use_domain_randomization: bool = False,
     ) -> None:
         """
         Initialize the TaskEnv environment and load all required components.
@@ -121,6 +137,7 @@ class TaskEnv:
             max_steps: Maximum number of simulation steps before termination.
             use_domain_randomization: Whether to apply domain randomization. Default is False.
         """
+        self.obs = None
         self.cfg = config.get("config")
         assert self.cfg is not None, "You must pass the main config object under the 'config' key in config."
         self.task_name = self.cfg.task.name
@@ -134,9 +151,11 @@ class TaskEnv:
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
         if self.cfg.write_video:
-            self.video_path = Path(self.cfg.log_path).expanduser() / "videos"
-            self.video_path.mkdir(parents=True, exist_ok=True)
-            self._video_writer = None
+            video_path = Path(self.cfg.log_path).expanduser() / "videos"
+            video_path.mkdir(parents=True, exist_ok=True)
+            date_str= datetime.now().strftime("%Y%m%d")
+            video_name = str(video_path) + f"/{self.task_name}_{date_str}.mp4"
+            self._video_writer = create_video_writer(fpath=video_name,resolution=(448, 672))
 
         self.subtasks = []
         self._task_stages = None
@@ -214,7 +233,6 @@ class TaskEnv:
                 "use_impedances": False,
             }
             cfg["robots"][0]["controller_config"]["base"] = base
-
         return cfg
 
     def load_env(self) -> EnvironmentWrapper:
@@ -354,6 +372,8 @@ class TaskEnv:
 
         """
         obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
+        self.obs = self._preprocess_obs(obs)
+        self._write_video()
 
         # Create sub task info
         subtask_info = {
@@ -417,6 +437,7 @@ class TaskEnv:
         Returns:
             None
         """
+        self._video_writer = None
         self._env.close()
         og.shutdown()
 
@@ -429,6 +450,61 @@ class TaskEnv:
         self._subtask = None
         self._stage_idx = 0
         self._completed = False
+
+    def _preprocess_obs(self, obs: dict) -> dict:
+        """
+        Preprocess the observation dictionary before passing it to the policy.
+        Args:
+            obs (dict): The observation dictionary to preprocess.
+
+        Returns:
+            dict: The preprocessed observation dictionary.
+        """
+        obs = flatten_obs_dict(obs)
+        base_pose = self._robot.get_position_orientation()
+        cam_rel_poses = []
+        # The first time we query for camera parameters, it will return all zeros
+        # For this case, we use camera.get_position_orientation() instead.
+        # The reason we are not using camera.get_position_orientation() by defualt is because it will always return the most recent camera poses
+        # However, since og render is somewhat "async", it takes >= 3 render calls per step to actually get the up-to-date camera renderings
+        # Since we are using n_render_iterations=1 for speed concern, we need the correct corresponding camera poses instead of the most update-to-date one.
+        # Thus, we use camera parameters which are guaranteed to be in sync with the visual observations.
+        for camera_name in ROBOT_CAMERA_NAMES["R1Pro"].values():
+            camera = self._robot.sensors[camera_name.split("::")[1]]
+            direct_cam_pose = camera.camera_parameters["cameraViewTransform"]
+            if np.allclose(direct_cam_pose, np.zeros(16)):
+                cam_rel_poses.append(
+                    th.cat(T.relative_pose_transform(*(camera.get_position_orientation()), *base_pose))
+                )
+            else:
+                cam_pose = T.mat2pose(th.tensor(np.linalg.inv(np.reshape(direct_cam_pose, [4, 4]).T), dtype=th.float32))
+                cam_rel_poses.append(th.cat(T.relative_pose_transform(*cam_pose, *base_pose)))
+        obs["robot_r1::cam_rel_poses"] = th.cat(cam_rel_poses, axis=-1)
+        return obs
+
+    def _write_video(self) -> None:
+        """
+        Write the current robot observations to video.
+        """
+        # concatenate obs
+        left_wrist_rgb = cv2.resize(
+            self.obs[ROBOT_CAMERA_NAMES["R1Pro"]["left_wrist"] + "::rgb"].numpy(),
+            (224, 224),
+        )
+        right_wrist_rgb = cv2.resize(
+            self.obs[ROBOT_CAMERA_NAMES["R1Pro"]["right_wrist"] + "::rgb"].numpy(),
+            (224, 224),
+        )
+        head_rgb = cv2.resize(
+            self.obs[ROBOT_CAMERA_NAMES["R1Pro"]["head"] + "::rgb"].numpy(),
+            (448, 448),
+        )
+        write_video(
+            np.expand_dims(np.hstack([np.vstack([left_wrist_rgb, right_wrist_rgb]), head_rgb]), 0),
+            video_writer=self._video_writer,
+            batch_size=1,
+            mode="rgb",
+        )
 
     @staticmethod
     def collect_tokens_and_entries(data: dict) -> tuple[dict[str, dict], dict]:
@@ -451,7 +527,6 @@ class TaskEnv:
             if isinstance(v, dict) and ("root_link" in v or "args" in v):
                 entries[k] = v
         return entries, robot_poses
-
 
     def randomize_scene_instances(self, instances_dir) -> dict[str, dict]:
         """
@@ -638,7 +713,7 @@ if __name__ == "__main__":
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Initialize environment ---
-    env = TaskEnv(config={"config": config}, instance_id=1)
+    env = TaskEnv(config={"config": config}, instance_id=1, use_domain_randomization=False)
     stages = get_sub_tasks(task_name=config.task.name)
 
     # --- Loop over episodes ---
@@ -652,12 +727,15 @@ if __name__ == "__main__":
         env.set_subtasks()
         obs = env.reset()
 
+        step_rewards = {}
+        step_success = {}
+
         df = pd.read_parquet(parquet_path)
         stage_states = [{"name": s["name"], "reward": 0.0, "status": "pending"} for s in stages]
         stage_states[0]["status"] = "active"
+        step_rewards.update({stage_states[0]['name']:[]})
+        step_success.update({stage_states[0]['name']:[]})
 
-        step_rewards = []
-        step_success = False
 
         with Live(make_table(stage_states), console=console, refresh_per_second=4) as live:
             for _, row in df.iterrows():
@@ -679,18 +757,20 @@ if __name__ == "__main__":
                     stage_states[idx]["status"] = "failed"
 
                 stage_states[idx]["reward"] = sub_task_info["reward"]
-                step_rewards.append(float(sub_task_info["reward"]))
+                step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
+                step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
 
                 # Move to the next stage
                 if sub_task_info["done"] and has_next_stage:
                     stage_states[next_idx]["status"] = "active"
+                    step_rewards.update({stage_states[next_idx]['name']: []})
+                    step_success.update({stage_states[next_idx]['name']: []})
 
                 live.update(make_table(stage_states))
 
                 # Stop if all done
                 if info.get("all_subtasks_complete", False):
                     console.print("[green]All subtasks completed!")
-                    step_success = True
                     break
 
         # --- Save metrics ---
@@ -700,7 +780,8 @@ if __name__ == "__main__":
                 "reward": step_rewards,
                 "is_successful": step_success,
             }
-            metrics_file = out_dir / "metrics.jsonl"
+            date_str = datetime.now().strftime("%Y%m%d")
+            metrics_file = out_dir / f"rewards_{date_str}.jsonl"
             with open(metrics_file, "a", encoding="utf-8") as fjsonl:
                 fjsonl.write(json.dumps(metrics) + "\n")
 

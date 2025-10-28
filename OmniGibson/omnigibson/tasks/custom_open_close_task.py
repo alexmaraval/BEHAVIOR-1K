@@ -1,14 +1,25 @@
 import math
 from omnigibson.object_states.open_state import _compute_joint_threshold
-from omnigibson.scenes.traversable_scene import TraversableScene
 from omnigibson.tasks.custom_task_base import BaseTask
 from omnigibson.termination_conditions.timeout import Timeout
 from omnigibson.utils.constants import JointType
 from omnigibson.utils.python_utils import classproperty
 
 
-def _open_fraction(obj):
-    """Return max open fraction across all openable joints on this object (0..1)."""
+def _iter_openable_joints_and_dirs(obj):
+    """
+    Return the list of openable joints and their corresponding open directions.
+    If the object's metadata defines `openable_joint_ids`, only those joints are considered.
+    Otherwise, all joints are assumed openable with a default positive direction (+1).
+    Args:
+        obj: The simulated object with `joints` and optional `metadata`.
+
+    Returns:
+        A tuple `(joints, dirs)` where:
+            - `joints` is a list of joint instances.
+            - `dirs` is a list of direction multipliers (+1 or -1) for each joint.
+
+    """
     md = getattr(obj, "metadata", None)
     joints, dirs = [], []
     if md and "openable_joint_ids" in md and len(md["openable_joint_ids"]) > 0:
@@ -18,9 +29,29 @@ def _open_fraction(obj):
             if name in obj.joints:
                 joints.append(obj.joints[name])
                 dirs.append(1 if d >= 0 else -1)
-    else:
+
+    # Fallback if none resolved
+    if not joints:
         joints = list(obj.joints.values())
         dirs = [1] * len(joints)
+    return joints, dirs
+
+
+def _open_fraction(obj):
+    """
+    Compute the maximum open fraction across all openable joints of an object.
+    The open fraction represents how far a joint is opened relative to its total range
+    (0.0 = fully closed, 1.0 = fully open). If multiple openable joints exist, the maximum
+    fraction across all of them is returned.
+    Args:
+        obj: The simulated object with `joints` and optional `metadata` describing openable joints.
+
+    Returns:
+        The maximum open fraction among all openable joints (range [0.0, 1.0]).
+
+    """
+    joints, dirs = _iter_openable_joints_and_dirs(obj)
+
     fracs = []
     for j, d in zip(joints, dirs):
         pos = float(j.get_state()[0])
@@ -30,27 +61,50 @@ def _open_fraction(obj):
     return max(fracs) if fracs else 0.0
 
 
+def _joint_open_metrics(joint, direction):
+    """
+    Compute opening metrics for a single joint.
+    Measures how much the joint has opened relative to its full range and returns
+    both the absolute and normalized opening values.
+    Args:
+        joint: A joint instance that provides `get_state()` and `joint_type`.
+        direction: Opening direction multiplier (+1 or -1).
+
+    Returns:
+        A tuple `(opened, total, fraction)` where:
+            - `opened` : The absolute amount opened (radians or meters).
+            - `total` : The total possible motion range (radians or meters).
+            - `fraction` : The normalized open fraction (opened / total, range [0.0, 1.0]).
+
+    """
+    # Uses your existing threshold helper
+    pos = float(joint.get_state()[0])
+    _, open_end, closed_end = _compute_joint_threshold(joint, direction)
+    opened = abs(pos - closed_end)  # how far from fully closed
+    total = abs(open_end - closed_end)  # full travel
+    frac = (opened / total) if total > 1e-6 else 0.0
+    return opened, total, frac
+
+
 def _is_open_ge_angle(obj, min_deg: float = 90.0, min_frac: float = 0.8) -> bool:
-    """Return True if any openable joint is opened at least min_deg (revolute) or min_frac (generic)."""
+    """
+    Check if any openable joint is open beyond a specified threshold.
+    For revolute joints, this checks if the opening angle exceeds a minimum degree threshold or fractional threshold.
+    For prismatic or other joints, it checks only the fractional threshold.
+    Args:
+        obj: The simulated object with `joints` and optional `metadata` describing openable joints.
+        min_deg: Minimum angular threshold (in degrees) to consider a revolute joint as "open".
+        min_frac: Minimum fraction (0.0–1.0) of full range required to consider a joint as "open".
+
+    Returns:
+        True if any openable joint meets or exceeds the specified thresholds; otherwise False.
+
+    """
     angle_req = math.radians(min_deg)
-    md = getattr(obj, "metadata", None)
-    joints, dirs = [], []
-    if md and "openable_joint_ids" in md and len(md["openable_joint_ids"]) > 0:
-        for tup in list(md["openable_joint_ids"].items()):
-            name = tup[1]
-            d = tup[2] if len(tup) > 2 else 1
-            if name in obj.joints:
-                joints.append(obj.joints[name])
-                dirs.append(1 if d >= 0 else -1)
-    else:
-        joints = list(obj.joints.values())
-        dirs = [1] * len(joints)
+    joints, dirs = _iter_openable_joints_and_dirs(obj)
 
     for j, d in zip(joints, dirs):
-        pos = float(j.get_state()[0])
-        _, open_end, closed_end = _compute_joint_threshold(j, d)
-        opened = abs(pos - closed_end)
-        total = abs(open_end - closed_end)
+        opened, total, frac = _joint_open_metrics(j, d)
         if j.joint_type == JointType.JOINT_REVOLUTE:
             if total >= angle_req and opened >= angle_req:
                 return True
@@ -62,49 +116,19 @@ def _is_open_ge_angle(obj, min_deg: float = 90.0, min_frac: float = 0.8) -> bool
     return False
 
 
-def _iter_openable_joints_and_dirs(obj):
-    """Return (joints, directions) for openable joints on obj.
-
-    If metadata lists specific openable joints, include those present in obj.joints.
-    If none are found or metadata absent, fall back to all joints with default direction +1.
+def _is_closed_le_angle(obj, max_deg: float = 5.0, max_frac: float = 0.1) -> bool:
     """
-    md = getattr(obj, "metadata", None)
-    joints, dirs = [], []
-    if md and "openable_joint_ids" in md and len(md["openable_joint_ids"]) > 0:
-        for tup in list(md["openable_joint_ids"].items()):
-            name = tup[1]
-            d = tup[2] if len(tup) > 2 else 1
-            if name in obj.joints:
-                joints.append(obj.joints[name])
-                dirs.append(1 if d >= 0 else -1)
-    # Fallback if none resolved
-    if not joints:
-        joints = list(obj.joints.values())
-        dirs = [1] * len(joints)
-    return joints, dirs
+    Check if an object's openable joints are sufficiently closed.
+    For revolute joints, this checks if the opened angle is below a small angular or fractional threshold.
+    For prismatic and other joints, only the fractional threshold is used.
+    Args:
+        obj: The simulated object with `joints`.
+        max_deg: Maximum opening angle (degrees) to still consider the joint "closed".
+        max_frac: Maximum open fraction (0.0–1.0) allowed for a joint to be considered "closed".
 
+    Returns:
+        True if the object is considered closed according to the thresholds, else False.
 
-def _joint_open_metrics(joint, direction):
-    # Uses your existing threshold helper
-    pos = float(joint.get_state()[0])
-    _, open_end, closed_end = _compute_joint_threshold(joint, direction)
-    opened = abs(pos - closed_end)  # how far from fully closed
-    total = abs(open_end - closed_end)  # full travel
-    frac = (opened / total) if total > 1e-6 else 0.0
-    return opened, total, frac
-
-
-def _is_closed_le_angle(
-    obj,
-    max_deg: float = 5.0,
-    max_frac: float = 0.1,
-    require_all: bool = True,
-) -> bool:
-    """
-    Return True if the door is sufficiently closed:
-    - Revolute: opened <= max_deg (or opened/total <= max_frac)
-    - Prismatic / other: opened/total <= max_frac
-    require_all=True means all openable joints must satisfy the closed condition.
     """
     angle_tol = math.radians(max_deg)
     joints, dirs = _iter_openable_joints_and_dirs(obj)
@@ -117,38 +141,34 @@ def _is_closed_le_angle(
             closed_ok = total > 1e-6 and frac <= max_frac
         results.append(closed_ok)
 
-    return all(results) if require_all else any(results)
+    return all(results)
 
 
 def _open_angles(obj):
     """
-    Compute detailed opening info for all openable joints on @obj.
+    Compute detailed opening metrics for all openable joints.
+    Calculates per-joint and overall opening data, including angular values (for revolute joints),
+    total travel distance, and open fractions.
+    Args:
+        obj: The simulated object with `joints`.
 
     Returns:
-        dict with keys:
-            - max_angle_deg (float): maximum opened angle in degrees among revolute joints (0.0 if none)
-            - per_joint (list[dict]): one entry per considered joint with fields
-                {name, type, opened, total, fraction, angle_deg}
+        A dictionary with:
+            - `max_angle_deg` : The maximum opened angle among revolute joints in degrees (0.0 if none).
+            - `per_joint` : Per-joint information, each containing:
+                    - `name` : Joint name.
+                    - `type` : Joint type (e.g., revolute, prismatic).
+                    - `opened` :Current opened distance or angle.
+                    - `total` : Total possible motion range.
+                    - `fraction` : Normalized open fraction (0–1).
+                    - `angle_deg` : Current opened angle in degrees (0.0 for non-revolute).
     """
-    md = getattr(obj, "metadata", None)
-    joints, dirs, names = [], [], []
-    if md and "openable_joint_ids" in md and len(md["openable_joint_ids"]) > 0:
-        for tup in list(md["openable_joint_ids"].items()):
-            name = tup[1]
-            d = tup[2] if len(tup) > 2 else 1
-            if name in obj.joints:
-                joints.append(obj.joints[name])
-                dirs.append(1 if d >= 0 else -1)
-                names.append(name)
-    else:
-        for k, j in obj.joints.items():
-            joints.append(j)
-            dirs.append(1)
-            names.append(k)
+
+    joints, dirs = _iter_openable_joints_and_dirs(obj)
 
     per_joint = []
     max_angle_deg = 0.0
-    for j, d, nm in zip(joints, dirs, names):
+    for j, d in zip(joints, dirs):
         pos = float(j.get_state()[0])
         _, open_end, closed_end = _compute_joint_threshold(j, d)
         opened = abs(pos - closed_end)
@@ -159,7 +179,6 @@ def _open_angles(obj):
             max_angle_deg = max(max_angle_deg, angle_deg)
         per_joint.append(
             {
-                "name": nm,
                 "type": j.joint_type,
                 "opened": opened,
                 "total": total,
@@ -178,22 +197,21 @@ class SufficientlyOpenTask(BaseTask):
     For status="closed": all openable joints must be within the closed tolerance.
 
     Args:
-        target_object_name (str): name of the object to evaluate (e.g., fridge)
-        allowed_deg (float): threshold in degrees. For status="open": minimum opened angle (revolute).
+        target_object_name: name of the object to evaluate (e.g., fridge)
+        allowed_deg: threshold in degrees. For status="open": minimum opened angle (revolute).
                              For status="closed": maximum opened angle tolerance (revolute).
-        allowed_frac (float): fraction threshold in [0,1]. For status="open": minimum opened fraction.
+        allowed_frac: fraction threshold in [0,1]. For status="open": minimum opened fraction.
                               For status="closed": maximum opened fraction.
     """
 
     def __init__(
-        self,
-        target_object_name: str,
-        allowed_deg: float = 90.0,
-        allowed_frac: float = 0.8,
-        status: str = "open",
-        termination_config=None,
-        reward_config=None,
-        include_obs: bool = False,
+            self,
+            target_object_name: str,
+            allowed_deg: float = 90.0,
+            allowed_frac: float = 0.8,
+            status: str = "open",
+            termination_config=None,
+            reward_config=None,
     ):
         self._target = target_object_name
         self._allowed_deg = float(allowed_deg)
@@ -202,16 +220,13 @@ class SufficientlyOpenTask(BaseTask):
         self._prev_progress = None
         term_cfg = dict(termination_config or {})
         term_cfg.setdefault("max_steps", 4000)
-        super().__init__(termination_config=term_cfg, reward_config=reward_config or {}, include_obs=include_obs)
+        super().__init__(termination_config=term_cfg, reward_config=reward_config or {})
 
     def _create_termination_conditions(self):
         return {"timeout": Timeout(max_steps=self._termination_config["max_steps"])}
 
     def _create_reward_functions(self):
         return {}
-
-    def _get_obs(self, env):
-        return {}, {}
 
     @classproperty
     def default_termination_config(cls):
@@ -256,7 +271,7 @@ class SufficientlyOpenTask(BaseTask):
         if status == "open":
             ok = _is_open_ge_angle(obj, min_deg=self._allowed_deg, min_frac=self._allowed_frac)
         elif status == "closed":
-            ok = _is_closed_le_angle(obj, max_deg=self._allowed_deg, max_frac=self._allowed_frac, require_all=True)
+            ok = _is_closed_le_angle(obj, max_deg=self._allowed_deg, max_frac=self._allowed_frac)
         else:
             ok = False
 
@@ -297,20 +312,15 @@ class SufficientlyOpenTask(BaseTask):
         done_out = any(d.get("done", False) for d in tc.values())
         return float(dense), done_out, info
 
-    @classproperty
-    def default_reward_config(cls):
-        return {"r_scale": 1.0, "r_success": 10.0, "r_clip_abs": 0.0, "r_offset": 0.0}
-
 
 class SufficientlyClosedTask(SufficientlyOpenTask):
     def __init__(
-        self,
-        target_object_name: str,
-        allowed_deg: float = 5.0,
-        allowed_frac: float = 0.1,
-        termination_config=None,
-        reward_config=None,
-        include_obs: bool = False,
+            self,
+            target_object_name: str,
+            allowed_deg: float = 5.0,
+            allowed_frac: float = 0.1,
+            termination_config=None,
+            reward_config=None,
     ):
         super().__init__(
             target_object_name=target_object_name,
@@ -319,7 +329,6 @@ class SufficientlyClosedTask(SufficientlyOpenTask):
             status="closed",
             termination_config=termination_config,
             reward_config=reward_config,
-            include_obs=include_obs,
         )
         self._prev_progress = None  # track previous closed progress
 
@@ -339,7 +348,6 @@ class SufficientlyClosedTask(SufficientlyOpenTask):
             obj,
             max_deg=self._allowed_deg,
             max_frac=self._allowed_frac,
-            require_all=True,
         )
 
         # Closed progress in [0,1] and signed delta

@@ -1,13 +1,12 @@
 from abc import ABCMeta, abstractmethod
 from copy import deepcopy
 
-from omnigibson.utils.gym_utils import GymObservable
 from omnigibson.utils.python_utils import Registerable, classproperty
 
 REGISTERED_TASKS = dict()
 
 
-class BaseTask(GymObservable, Registerable, metaclass=ABCMeta):
+class BaseTask(Registerable, metaclass=ABCMeta):
     """
     Base Task class.
     Task-specific reset_scene, reset_agent, step methods are implemented in subclasses
@@ -21,7 +20,6 @@ class BaseTask(GymObservable, Registerable, metaclass=ABCMeta):
             specific to the task class. Default is None, which corresponds to a default config being usd. Note that
             any keyword required by a specific task class but not specified in the config will automatically be filled
             in with the default config. See cls.default_reward_config for default values used
-        include_obs (bool): Whether to include observations or not for this task
     """
 
     def __init__(self, termination_config=None, reward_config=None, include_obs=True):
@@ -49,20 +47,13 @@ class BaseTask(GymObservable, Registerable, metaclass=ABCMeta):
         self._reward_functions = self._create_reward_functions()
 
         # Store other internal vars that will be populated at runtime
-        self._loaded = False
         self._reward = None
         self._done = None
         self._success = None
         self._info = None
-        self._low_dim_obs_dim = None
-        self._low_dim_obs_keys = None
-        self._include_obs = include_obs
 
         # Run super init
         super().__init__()
-
-    def _load_observation_space(self):
-        return {}
 
     @abstractmethod
     def _create_termination_conditions(self):
@@ -168,53 +159,6 @@ class BaseTask(GymObservable, Registerable, metaclass=ABCMeta):
         total_info["reward_breakdown"] = breakdown_dict
 
         return total_reward, total_info
-
-    @abstractmethod
-    def _get_obs(self, env):
-        """
-        Get task-specific observation
-
-        Args:
-            env (Environment): Environment instance
-
-        Returns:
-            2-tuple:
-                - dict: Keyword-mapped low dimensional observations from this task
-                - dict: All other keyword-mapped observations from this task
-        """
-        raise NotImplementedError()
-
-    def get_obs(self, env, flatten_low_dim=True):
-        # Args: env (Environment): environment instance
-        # Args: flatten_low_dim (bool): Whether to flatten low-dimensional observations
-
-        if not self._include_obs:
-            return dict()
-
-        # Grab obs internally
-        low_dim_obs, obs = self._get_obs(env=env)
-
-        # Possibly flatten low dim and add to main observation dictionary
-        if low_dim_obs:
-            obs["low_dim"] = self._flatten_low_dim_obs(obs=low_dim_obs) if flatten_low_dim else low_dim_obs
-
-        return obs
-
-    def get_obs(self, env, flatten_low_dim=True):
-        # Args: env (Environment): environment instance
-        # Args: flatten_low_dim (bool): Whether to flatten low-dimensional observations
-
-        if not self._include_obs:
-            return dict()
-
-        # Grab obs internally
-        low_dim_obs, obs = self._get_obs(env=env)
-
-        # Possibly flatten low dim and add to main observation dictionary
-        if low_dim_obs:
-            obs["low_dim"] = self._flatten_low_dim_obs(obs=low_dim_obs) if flatten_low_dim else low_dim_obs
-
-        return obs
 
     def step(self, env, action):
         """
