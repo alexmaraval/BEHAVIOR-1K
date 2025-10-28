@@ -20,12 +20,11 @@ def get_sub_tasks(task_name: str) -> list[dict[str, ...]]:
 
 name_radio = "radio_89"
 name_coffe_table = "coffee_table_koagbh_0"
-# radio_handle_transform = np.array(
-#     [[0.25, 0.43, 0.042],
-#      [0.41, 0.68, 0.067],
-#      [0.050, 0.084, 0.0083]]
-# )
-radio_handle_transform = None
+radio_handle_transform = np.array(
+    [[0.25, 0.43, 0.042],
+     [0.41, 0.68, 0.067],
+     [0.050, 0.084, 0.0083]]
+)
 
 move_to_radio = partial(
     BaseNavigationTask,
