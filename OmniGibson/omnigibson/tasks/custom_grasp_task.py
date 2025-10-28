@@ -1,16 +1,14 @@
 import math
-import omnigibson.utils.transform_utils as T
 import torch as th
 from omnigibson.object_states import AttachedTo
 from omnigibson.object_states.robot_related_states import IsGrasping
 from omnigibson.reward_functions.reward_function_base import BaseRewardFunction
 from omnigibson.tasks.custom_task_base import BaseTask
+from omnigibson.termination_conditions.falling import Falling
+from omnigibson.termination_conditions.termination_condition_base import SuccessCondition
 from omnigibson.termination_conditions.timeout import Timeout
 from omnigibson.utils.motion_planning_utils import detect_robot_collision_in_sim
 from omnigibson.utils.python_utils import classproperty
-from omnigibson.termination_conditions.termination_condition_base import SuccessCondition
-from omnigibson.termination_conditions.falling import Falling
-from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _get_named, _front_target
 
 
 class _GraspSuccess(SuccessCondition):
@@ -134,12 +132,12 @@ class RobustGraspTask(BaseTask):
     """
 
     def __init__(
-        self,
-        obj_name: str,
-        robot_idn: int = 0,
-        termination_config=None,
-        reward_config=None,
-        transform_matrix=None,
+            self,
+            obj_name: str,
+            robot_idn: int = 0,
+            termination_config=None,
+            reward_config=None,
+            transform_matrix=None,
     ):
         self._obj_name = obj_name
         self._robot_idn = int(robot_idn)
@@ -172,9 +170,6 @@ class RobustGraspTask(BaseTask):
             robot.release_grasp_immediately(arm=arm)
 
         super().reset(env)
-
-    def _get_obs(self, env):
-        return {}, {}
 
     @classproperty
     def default_termination_config(cls):
