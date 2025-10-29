@@ -23,7 +23,7 @@ from omnigibson.object_states import Pose
 from omnigibson.tasks.grasp_task import GraspTask
 from omnigibson.tasks.point_reaching_task import PointReachingTask
 
-from omnigibson.learning.examples.env_utils import (build_env, load_task_instance, get_transformed_action, make_table, setup_task, task_setup)
+from env_utils import build_env, load_task_instance, get_transformed_action, make_table, setup_task, task_setup
 
 import omnigibson as og
 
@@ -44,21 +44,23 @@ gm.ENABLE_TRANSITION_RULES = True
 name_radio = "radio_89"
 name_coffe_table = "coffee_table_koagbh_0"
 
+
 @task_setup(goal_type="nav", target=name_radio, front_offset=0)
-def make_move_to_radio(prev_reward, env):
+def make_move_to_radio(max_steps, env):
     return MoveBaseToObjectTask(
         target_object_name=name_radio,
         goal_tolerance=1.3,
-        termination_config={"max_steps": 10000},
+        termination_config={"max_steps": max_steps},
         include_obs=False,
     )
 
+
 @task_setup(goal_type=None, target=name_radio)
-def make_grasp_radio(prev_reward, env):
+def make_grasp_radio(max_steps, env):
     reward_config = {"collision_penalty": 0.000000001}
     task = RobustGraspTask(
         obj_name=name_radio,
-        termination_config={"max_steps": 10000},
+        termination_config={"max_steps": max_steps},
         reward_config=reward_config,
         include_obs=False,
         objects_config=[],
@@ -67,15 +69,16 @@ def make_grasp_radio(prev_reward, env):
 
 
 @task_setup(goal_type=None, target=name_radio)
-def make_radio_on(prev_reward, env):
-    reward_config = {"r_offset": prev_reward or 0.0}
+def make_radio_on(max_steps, env):
+    # reward_config = {"r_offset": prev_reward or 0.0}
     task = OnTask(
         target_object_name=name_radio,
         # reward_config=reward_config,
-        termination_config={"max_steps": 10000},
+        termination_config={"max_steps": max_steps},
         include_obs=False,
     )
     return task
+
 
 def get_sub_stages_factory():
     stages = [
@@ -86,16 +89,15 @@ def get_sub_stages_factory():
     ]
     return stages
 
+
 console = Console()
 
 
 def run_episode(parquet, env, instance_id, task_name):
-
     obs, _ = env.reset()
     load_task_instance(env, instance_id)
 
     df = pd.read_parquet(parquet)
-
 
     # Stage list with either subtask objects or predicate callables
     stages = get_sub_stages_factory()
@@ -129,11 +131,12 @@ def run_episode(parquet, env, instance_id, task_name):
 
             stage = stages[stage_i]
             if sub_task is None:
-                sub_task = stage["factory"](prev_reward, env)
+                sub_task = stage["factory"](max_steps=10, env=env)
 
             rew_s, done_s, info_s = sub_task.step(env=env, action=action)
 
-            completed = bool(info_s.get("done", {}).get("success", False)) if isinstance(info_s, dict) else False
+            completed = info_s.get("done", {}).get("success", False)
+            truncated_s = False if completed else True
 
             current_reward = float(rew_s)
             stage_states[stage_i]["reward"] = current_reward
@@ -145,8 +148,8 @@ def run_episode(parquet, env, instance_id, task_name):
             step_rewards.append(current_reward)
             step_success.append(1 if completed else 0)
 
-            if completed:
-                stage_states[stage_i]["status"] = "completed"
+            if done_s.item():
+                stage_states[stage_i]["status"] = "completed" if completed else "truncated"
                 sub_task_status[stage_i] = True
                 # prev_reward = current_reward + 0.1
 
@@ -174,14 +177,11 @@ def run_episode(parquet, env, instance_id, task_name):
     return step_rewards, step_success
 
 
-
-
 def main():
     task_name = "turning_on_radio"
     dataset_path = "/home/jiacheng/b1k-baselines/data/data/task-0000/"
     i = 0
-    env = build_env(activity_definition_id=0, instance_id=0, activity_name=task_name,
-                    scene="house_double_floor_lower")
+    env = build_env(activity_definition_id=0, instance_id=0, activity_name=task_name, scene="house_double_floor_lower")
 
     out_dir = Path(task_name)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -191,8 +191,8 @@ def main():
     for f in pgb_episode:
         pgb_episode.set_description(f"{f}")
         # print(f)
-        # if f != "episode_00000050.parquet":
-        #     continue
+        if f != "episode_00000030.parquet":
+            continue
         episode_index = Path(f)
         instance_id = int(episode_index.stem.split("_")[-1])
         instance_id = int((instance_id // 10) % 1e3)
@@ -207,15 +207,12 @@ def main():
         }
         all_rewards.append(metrics)
         with open(out_dir / "metrics_21_10.jsonl", "a", encoding="utf-8") as fjsonl:
-                fjsonl.write(json.dumps(metrics) + "\n")
-        # break
+            fjsonl.write(json.dumps(metrics) + "\n")
+        break
         # if i>3:
         #     break
         # else:
         #     i += 1
-
-
-
 
     # with open(out_dir / "metrics.jsonl", "a", encoding="utf-8") as fjsonl:
     #     for reward in all_rewards:
@@ -224,10 +221,8 @@ def main():
     # with open(out_dir / "metrics.jsonl", "a", encoding="utf-8") as fjsonl:
     #     fjsonl.write(json.dumps(all_rewards) + "\n")
 
-
     env.close()
     og.shutdown()
-
 
 
 if __name__ == "__main__":

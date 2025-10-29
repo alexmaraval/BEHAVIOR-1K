@@ -14,4 +14,5 @@ __all__ = [
     "EnvironmentWrapper",
     "REGISTERED_ENV_WRAPPERS",
     "VectorEnvironment",
+    "TaskEnv",
 ]

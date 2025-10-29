@@ -13,7 +13,7 @@ sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
 import omnigibson as og
 from omnigibson.macros import gm
 
-from omnigibson.learning.examples.env_utils import build_env, load_task_instance, get_transformed_action, make_table, task_setup
+from env_utils import build_env, load_task_instance, get_transformed_action, make_table, task_setup
 
 from omnigibson.tasks.custom_tasks import (
     MoveBaseToObjectTask,
@@ -209,6 +209,7 @@ def make_grasp_pan(prev_reward, env):
     )
     return task
 
+
 def get_sub_stages_factory():
     stages = [
         {"name": "move_to_fridge", "kind": "task", "factory": make_move_to_fridge},
@@ -228,6 +229,7 @@ def get_sub_stages_factory():
     ]
     return stages
 
+
 console = Console()
 
 
@@ -236,8 +238,9 @@ def main():
     ap.add_argument("--parquet", type=str, required=True)
     args = ap.parse_args()
 
-    env = build_env(activity_definition_id=0, instance_id=0,
-                    activity_name="cook_bacon")  # Predefined IDs for episode_00460010
+    env = build_env(
+        activity_definition_id=0, instance_id=0, activity_name="cook_bacon"
+    )  # Predefined IDs for episode_00460010
     obs, _ = env.reset()
     load_task_instance(env, 1)
 

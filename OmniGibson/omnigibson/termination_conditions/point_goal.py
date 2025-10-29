@@ -27,9 +27,10 @@ class PointGoal(SuccessCondition):
     def _step(self, task, env, action):
         # Make sure task is of type PointNavigation -- we import at runtime to avoid circular imports
         from omnigibson.tasks.point_navigation_task import PointNavigationTask
+        from omnigibson.tasks.custom_base_navigation_task import BaseNavigationTask
 
         assert isinstance(
-            task, PointNavigationTask
+            task, (PointNavigationTask, BaseNavigationTask)
         ), f"Cannot use {self.__class__.__name__} with a non-PointNavigationTask task instance!"
         # Terminate if point goal is reached (distance below threshold)
         return (
