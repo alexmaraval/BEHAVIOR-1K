@@ -5,20 +5,18 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import math
 import numpy as np
 import torch as th
-import cv2
 
 sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
 
 import omnigibson as og
 import omnigibson.utils.transform_utils as T
-from omnigibson.learning.utils.eval_utils import PROPRIOCEPTION_INDICES
 from omnigibson.macros import gm
 from omnigibson.envs.env_wrapper import EnvironmentWrapper
 
-from omnigibson.learning.utils.eval_utils import TASK_NAMES_TO_INDICES, generate_basic_environment_config
 from gello.robots.sim_robot.og_teleop_utils import (
     augment_rooms,
     load_available_tasks,
@@ -153,9 +151,9 @@ class TaskEnv:
         if self.cfg.write_video:
             video_path = Path(self.cfg.log_path).expanduser() / "videos"
             video_path.mkdir(parents=True, exist_ok=True)
-            date_str= datetime.now().strftime("%Y%m%d")
+            date_str = datetime.now().strftime("%Y%m%d")
             video_name = str(video_path) + f"/{self.task_name}_{date_str}.mp4"
-            self._video_writer = create_video_writer(fpath=video_name,resolution=(448, 672))
+            self._video_writer = create_video_writer(fpath=video_name, resolution=(448, 672))
 
         self.subtasks = []
         self._task_stages = None
@@ -387,6 +385,7 @@ class TaskEnv:
             "max_collision": False,
         }
 
+        sub_task_terminated = False
         if self.task_combo is not None and self.subtasks:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
             info_s = info_s or {}
@@ -402,12 +401,23 @@ class TaskEnv:
             try:
                 if "falling" in info_s["done"]["termination_conditions"]:
                     falling = info_s["done"]["termination_conditions"]["falling"]["done"]
+            except Exception as e:
+                print(f"Stage {name}, falling check error: {e}")
+
+            try:
                 if "max_collision" in info_s["done"]["termination_conditions"]:
                     max_collision = info_s["done"]["termination_conditions"]["max_collision"]["done"]
+            except Exception as e:
+                print(f"Stage {name}, max_collision check error: {e}")
+
+            try:
                 if "timeout" in info_s["done"]["termination_conditions"]:
                     timeout = info_s["done"]["termination_conditions"]["timeout"]["done"]
             except Exception as e:
-                print(f" stage : {name}, {e}")
+                print(f"Stage {name}, timeout check error: {e}")
+
+
+            sub_task_terminated = any([falling, max_collision, timeout])
 
             subtask_info.update(
                 name=name,
@@ -428,6 +438,7 @@ class TaskEnv:
         info_out = info_env
         info_out["subtask"] = subtask_info
         info_out["all_subtasks_complete"] = self._completed
+        terminated_env = terminated_env or sub_task_terminated
 
         return obs, reward_env, terminated_env, truncated_env, info_out
 
@@ -690,7 +701,7 @@ if __name__ == "__main__":
     from task_env import TaskEnv
 
     with hydra.initialize_config_dir(
-        f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/learning/configs", version_base="1.1"
+            f"{Path(getsourcefile(lambda: 0)).parents[0].parent}/learning/configs", version_base="1.1"
     ):
         config = hydra.compose("base_config.yaml", overrides=sys.argv[1:])
 
@@ -715,7 +726,8 @@ if __name__ == "__main__":
 
     # --- Initialize environment ---
     env = TaskEnv(config={"config": config}, instance_id=1, use_domain_randomization=False)
-    stages = get_sub_tasks(task_name=config.task.name)
+
+    stages = get_sub_tasks(task_name=config.task.name)  # Just used here for showing table.
 
     # --- Loop over episodes ---
     for ep_idx, parquet_path in enumerate(tqdm(parquet_files, desc="Episodes", unit="episode"), start=1):
@@ -734,9 +746,8 @@ if __name__ == "__main__":
         df = pd.read_parquet(parquet_path)
         stage_states = [{"name": s["name"], "reward": 0.0, "status": "pending"} for s in stages]
         stage_states[0]["status"] = "active"
-        step_rewards.update({stage_states[0]['name']:[]})
-        step_success.update({stage_states[0]['name']:[]})
-
+        step_rewards.update({stage_states[0]['name']: []})
+        step_success.update({stage_states[0]['name']: []})
 
         with Live(make_table(stage_states), console=console, refresh_per_second=4) as live:
             for _, row in df.iterrows():
