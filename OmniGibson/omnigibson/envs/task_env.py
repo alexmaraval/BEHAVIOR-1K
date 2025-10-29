@@ -8,6 +8,7 @@ from pathlib import Path
 import cv2
 import math
 import numpy as np
+import torch
 import torch as th
 from hydra.utils import instantiate
 
@@ -41,6 +42,13 @@ from omnigibson.learning.utils.eval_utils import (
 from omnigibson.learning.utils.obs_utils import (
     create_video_writer,
     write_video,
+)
+
+sys.path.append(str(Path(__file__).parent.parent / 'Behavior-Dreamer'))
+from dreamer_training_utils import (
+    reward_base_vel_change_regularization,
+    reward_arm_pos_change_regularization,
+    reward_arm_vel_regularization
 )
 
 gm.ENABLE_FLATCACHE = True
@@ -105,8 +113,8 @@ class TaskCombination:
         if self.sparse_early_sub_goals and (self.current_index < len(self.tasks) - 1):
             reward = 0.0
         if done:
-            self.current_index += 1
             if info["done"]["success"]:
+                self.current_index += 1
                 return self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
             else:
                 return -self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
@@ -341,13 +349,43 @@ class TaskEnv:
         Returns:
              The initial observation from the environment after reset.
         """
+        self.load_task_instance()
         obs, info = self._env.reset()
 
-        self.load_task_instance()
+        self.prev_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
+        self.prev_ang_velocity_base = obs["robot_r1"]["proprio"][..., 155:158]
+        self.prev_velocity_left_arm = obs["robot_r1"]["proprio"][..., 179:186]
+        self.prev_velocity_right_arm = obs["robot_r1"]["proprio"][..., 218:225]
+        self.prev_velocity_torso = obs["robot_r1"]["proprio"][..., 240:244]
+        self.prev_velocity_left_gripper = obs["robot_r1"]["proprio"][..., 195:197]
+        self.prev_velocity_right_gripper = obs["robot_r1"]["proprio"][..., 234:236]
+        self.prev_angle_left_arm = obs["robot_r1"]["proprio"][..., 158:165]
+        self.prev_angle_right_arm = obs["robot_r1"]["proprio"][..., 197:204]
+        self.prev_angle_torso = obs["robot_r1"]["proprio"][..., 236:240]
+        self.prev_angle_left_gripper = obs["robot_r1"]["proprio"][..., 193:195]
+        self.prev_angle_right_gripper = obs["robot_r1"]["proprio"][..., 232:234]
+
+        self.curr_lin_velocity_base = None
+        self.curr_ang_velocity_base = None
+        self.curr_velocity_left_arm = None
+        self.curr_velocity_right_arm = None
+        self.curr_velocity_torso = None
+        self.curr_velocity_left_gripper = None
+        self.curr_velocity_right_gripper = None
+        self.curr_angle_left_arm = None
+        self.curr_angle_right_arm = None
+        self.curr_angle_torso = None
+        self.curr_angle_left_gripper = None
+        self.curr_angle_right_gripper = None
+
+        obs = self._preprocess_obs(obs)
+        obs["is_terminal"] = False
+        obs["is_first"] = True
 
         if self.task_combo is not None:
             self.task_combo.reset(self._env)
         self._reset_subtask_progress()
+
         return obs
 
     def step(self, action: th.Tensor) -> tuple[dict, float, bool, bool, dict]:
@@ -367,13 +405,78 @@ class TaskEnv:
 
         """
         obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
-        self.obs = self._preprocess_obs(obs)
-        self._write_video()
+        obs["is_terminal"] = terminated_env or truncated_env
+        obs["is_first"] = False
+
+        if self.cfg.robot.controllers.use_reward_regularization:
+            self.curr_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
+            self.curr_ang_velocity_base = obs["robot_r1"]["proprio"][..., 155:158]
+            self.curr_velocity_left_arm = obs["robot_r1"]["proprio"][..., 179:186]
+            self.curr_velocity_right_arm = obs["robot_r1"]["proprio"][..., 218:225]
+            self.curr_velocity_torso = obs["robot_r1"]["proprio"][..., 240:244]
+            self.curr_velocity_left_gripper = obs["robot_r1"]["proprio"][..., 195:197]
+            self.curr_velocity_right_gripper = obs["robot_r1"]["proprio"][..., 234:236]
+            self.curr_angle_left_arm = obs["robot_r1"]["proprio"][..., 158:165]
+            self.curr_angle_right_arm = obs["robot_r1"]["proprio"][..., 197:204]
+            self.curr_angle_torso = obs["robot_r1"]["proprio"][..., 236:240]
+            self.curr_angle_left_gripper = obs["robot_r1"]["proprio"][..., 193:195]
+            self.curr_angle_right_gripper = obs["robot_r1"]["proprio"][..., 232:234]
+
+            prev = torch.cat([self.prev_lin_velocity_base, self.prev_ang_velocity_base], dim=-1)
+            curr = torch.cat([self.curr_lin_velocity_base, self.curr_ang_velocity_base], dim=-1)
+            base_velocity_change_reg = reward_base_vel_change_regularization(prev, curr)
+
+            curr = torch.cat([
+                self.curr_velocity_left_arm,
+                self.curr_velocity_right_arm,
+                self.curr_velocity_torso,
+                self.curr_velocity_left_gripper,
+                self.curr_velocity_right_gripper,
+            ], dim=-1)
+            arm_velocity_reg = reward_arm_vel_regularization(curr)
+
+            prev = torch.cat([
+                self.prev_angle_left_arm,
+                self.prev_angle_right_arm,
+                self.prev_angle_torso,
+                self.prev_angle_left_gripper,
+                self.prev_angle_right_gripper,
+            ], dim=-1)
+            curr = torch.cat([
+                self.curr_angle_left_arm,
+                self.curr_angle_right_arm,
+                self.curr_angle_torso,
+                self.curr_angle_left_gripper,
+                self.curr_angle_right_gripper,
+            ], dim=-1)
+            arm_position_change_reg = reward_arm_pos_change_regularization(prev, curr)
+            reward_env += (
+                                  0.1 * base_velocity_change_reg + 0.0001 * arm_velocity_reg + 0.1 * arm_position_change_reg
+                          ) / 10.0
+
+            self.prev_lin_velocity_base = self.curr_lin_velocity_base
+            self.prev_ang_velocity_base = self.curr_ang_velocity_base
+            self.prev_velocity_left_arm = self.curr_velocity_left_arm
+            self.prev_velocity_right_arm = self.curr_velocity_right_arm
+            self.prev_velocity_torso = self.curr_velocity_torso
+            self.prev_velocity_left_gripper = self.curr_velocity_left_gripper
+            self.prev_velocity_right_gripper = self.curr_velocity_right_gripper
+            self.prev_angle_left_arm = self.curr_angle_left_arm
+            self.prev_angle_right_arm = self.curr_angle_right_arm
+            self.prev_angle_torso = self.curr_angle_torso
+            self.prev_angle_left_gripper = self.curr_angle_left_gripper
+            self.prev_angle_right_gripper = self.curr_angle_right_gripper
+
+        obs = self._preprocess_obs(obs)
+        self._write_video(obs)
 
         # Create sub task info
         subtask_info = {
             "name": None,
             "index": self._stage_idx,
+            "index_onehot": torch.nn.functional.one_hot(
+                torch.tensor(self._stage_idx).to(torch.long), num_classes=len(self.subtasks)
+            ),
             "reward": 0.0,
             "done": False,
             "success": False,
@@ -386,7 +489,7 @@ class TaskEnv:
         if self.task_combo is not None and self.subtasks:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
             info_s = info_s or {}
-            success = bool(info_s.get("done", {}).get("success", False))
+            success = bool(info_s["done"]["success"])
             self._stage_idx = min(self.task_combo.current_index, len(self.subtasks))
             name = None
             if self._stage_idx < len(self.subtasks):
@@ -413,7 +516,6 @@ class TaskEnv:
             except Exception as e:
                 print(f"Stage {name}, timeout check error: {e}")
 
-
             sub_task_terminated = any([falling, max_collision, timeout])
 
             subtask_info.update(
@@ -424,6 +526,10 @@ class TaskEnv:
                 timeout=False if success else timeout,
                 falling=False if success else falling,
                 max_collision=False if success else max_collision,
+                index=self._stage_idx,
+                index_onehot=torch.nn.functional.one_hot(
+                    torch.tensor(self._stage_idx).to(torch.long), num_classes=len(self.subtasks)
+                )
             )
 
             if combo_done:
@@ -459,6 +565,32 @@ class TaskEnv:
         self._stage_idx = 0
         self._completed = False
 
+    @staticmethod
+    def _preprocess_proprio(proprio):
+        if proprio.shape[-1] < 256:
+            return proprio
+        sliced_proprio = torch.cat(
+            [
+                proprio[..., 152:158],  # lin + ang vel
+                proprio[..., 158:165],  # left arm q
+                proprio[..., 179:186],  # left arm dq
+                proprio[..., 186:193],  # left eef pos + quat
+                proprio[..., 193:197],  # left gripper pos + vel
+                proprio[..., 197:204],  # right arm q
+                proprio[..., 218:225],  # right arm dq
+                proprio[..., 225:232],  # right eef pos + quat
+                proprio[..., 232:236],  # right gripper pos + vel
+                proprio[..., 236:244],  # torso q + dq
+            ],
+            dim=-1,
+        )
+        return sliced_proprio
+
+    @staticmethod
+    def _preprocess_rgb(image):
+        # channels is last dim -> keep only first 3 channels
+        return image[..., :3]
+
     def _preprocess_obs(self, obs: dict) -> dict:
         """
         Preprocess the observation dictionary before passing it to the policy.
@@ -488,31 +620,36 @@ class TaskEnv:
                 cam_pose = T.mat2pose(th.tensor(np.linalg.inv(np.reshape(direct_cam_pose, [4, 4]).T), dtype=th.float32))
                 cam_rel_poses.append(th.cat(T.relative_pose_transform(*cam_pose, *base_pose)))
         obs["robot_r1::cam_rel_poses"] = th.cat(cam_rel_poses, axis=-1)
+        obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
+        for k in obs:
+            if "rgb" in k:
+                obs[k] = self._preprocess_rgb(obs[k])
         return obs
 
-    def _write_video(self) -> None:
+    def _write_video(self, obs) -> None:
         """
         Write the current robot observations to video.
         """
-        # concatenate obs
-        left_wrist_rgb = cv2.resize(
-            self.obs[ROBOT_CAMERA_NAMES["R1Pro"]["left_wrist"] + "::rgb"].numpy(),
-            (224, 224),
-        )
-        right_wrist_rgb = cv2.resize(
-            self.obs[ROBOT_CAMERA_NAMES["R1Pro"]["right_wrist"] + "::rgb"].numpy(),
-            (224, 224),
-        )
-        head_rgb = cv2.resize(
-            self.obs[ROBOT_CAMERA_NAMES["R1Pro"]["head"] + "::rgb"].numpy(),
-            (448, 448),
-        )
-        write_video(
-            np.expand_dims(np.hstack([np.vstack([left_wrist_rgb, right_wrist_rgb]), head_rgb]), 0),
-            video_writer=self._video_writer,
-            batch_size=1,
-            mode="rgb",
-        )
+        if self.cfg.write_video:
+            # concatenate obs
+            left_wrist_rgb = cv2.resize(
+                obs[ROBOT_CAMERA_NAMES["R1Pro"]["left_wrist"] + "::rgb"].numpy(),
+                (224, 224),
+            )
+            right_wrist_rgb = cv2.resize(
+                obs[ROBOT_CAMERA_NAMES["R1Pro"]["right_wrist"] + "::rgb"].numpy(),
+                (224, 224),
+            )
+            head_rgb = cv2.resize(
+                obs[ROBOT_CAMERA_NAMES["R1Pro"]["head"] + "::rgb"].numpy(),
+                (448, 448),
+            )
+            write_video(
+                np.expand_dims(np.hstack([np.vstack([left_wrist_rgb, right_wrist_rgb]), head_rgb]), 0),
+                video_writer=self._video_writer,
+                batch_size=1,
+                mode="rgb",
+            )
 
     @staticmethod
     def collect_tokens_and_entries(data: dict) -> tuple[dict[str, dict], dict]:
