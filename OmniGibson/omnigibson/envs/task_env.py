@@ -9,8 +9,9 @@ import cv2
 import math
 import numpy as np
 import torch as th
+from hydra.utils import instantiate
 
-sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
+# sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
 
 import omnigibson as og
 import omnigibson.utils.transform_utils as T
@@ -215,22 +216,14 @@ class TaskEnv:
         cfg["robots"][0]["obs_modalities"] = ["proprio", "rgb"]  # TODO include more or take it as arg
         cfg["robots"][0]["proprio_obs"] = list(PROPRIOCEPTION_INDICES["R1Pro"].keys())
         cfg["task"]["termination_config"]["max_steps"] = int(human_stats["length"] * 2)
+        if self.cfg.robot.controllers is not None:
+            cfg["robots"][0]["controller_config"].update(self.cfg.robot.controllers)
 
         # Override env-level frequencies if requested
         if self.max_steps is not None:
             cfg["task"]["termination_config"]["max_steps"] = self.max_steps
         else:
             self.max_steps = cfg["task"]["termination_config"]["max_steps"]
-        if self.motor_type == "position":
-            base = {
-                "name": "HolonomicBaseJointController",
-                "motor_type": "position",
-                "pos_kp": 50,
-                "command_input_limits": None,
-                "command_output_limits": None,
-                "use_impedances": False,
-            }
-            cfg["robots"][0]["controller_config"]["base"] = base
         return cfg
 
     def load_env(self) -> EnvironmentWrapper:
@@ -241,7 +234,7 @@ class TaskEnv:
         """
         cfg = self._prepare_config()
         _env = og.Environment(configs=cfg)
-        _env = EnvironmentWrapper(env=_env)
+        _env = instantiate(self.cfg.env_wrapper, env=_env)
         return _env
 
     def load_robot(self) -> BaseRobot:
@@ -299,6 +292,10 @@ class TaskEnv:
 
         self._env.scene.update_initial_file()
         self._env.scene.reset()
+
+    @property
+    def id(self):
+        return self.instance_id
 
     @property
     def env(self) -> EnvironmentWrapper:
