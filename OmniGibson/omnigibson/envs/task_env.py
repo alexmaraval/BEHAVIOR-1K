@@ -385,6 +385,9 @@ class TaskEnv:
         if self.task_combo is not None:
             self.task_combo.reset(self._env)
         self._reset_subtask_progress()
+        obs["subtask_id"] = torch.nn.functional.one_hot(
+            torch.tensor(0).to(torch.long), num_classes=len(self.subtasks)
+        )
 
         return obs
 
