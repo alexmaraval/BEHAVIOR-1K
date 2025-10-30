@@ -6,7 +6,7 @@ from omnigibson.tasks.custom_grasp_task import RobustGraspTask
 from omnigibson.tasks.custom_open_close_task import SufficientlyClosedTask, SufficientlyOpenTask
 from omnigibson.tasks.custom_point_reaching_task import MoveEEToObjectTask
 from omnigibson.tasks.custom_predicate_task import OnTask
-from omnigibson.tasks.custom_predicate_task import OnTopStableTask, NextToTask, OnTopTask
+from omnigibson.tasks.custom_predicate_task import OnTopStableTask, NextToTask, OnTopTask, InsideTask
 
 max_steps = 5000
 task_factory = {}
@@ -26,29 +26,29 @@ radio_handle_transform = np.array(
      [0.050, 0.084, 0.0083]]
 )
 
-move_to_radio = partial(
+tr_move_to_radio = partial(
     BaseNavigationTask,
     target_object_name=name_radio,
     goal_tolerance=1,
     termination_config={"max_steps": 5000},
 )
 
-grasp_radio = partial(
+tr_grasp_radio = partial(
     RobustGraspTask,
     obj_name=name_radio,
     termination_config={"max_steps": 5000},
     transform_matrix=radio_handle_transform,
 )
 
-radio_on = partial(
+tr_radio_on = partial(
     OnTask,
     target_object_name=name_radio,
 )
 
 stages = [
-    {"name": "move_to_radio", "factory": move_to_radio},
-    {"name": "pick_radio", "factory": grasp_radio},
-    {"name": "radio_on", "factory": radio_on},
+    {"name": "move_to_radio", "factory": tr_move_to_radio},
+    {"name": "pick_radio", "factory": tr_grasp_radio},
+    {"name": "radio_on", "factory": tr_radio_on},
     # {"name": "place_radio", "kind": "task", "factory": place_radio},
 ]
 task_factory.update({"turning_on_radio": stages})
@@ -66,28 +66,28 @@ name_bacon_4 = "bacon_212"
 name_bacon_5 = "bacon_213"
 name_bacon_6 = "bacon_214"
 
-move_to_fridge = partial(
+cb_move_to_fridge = partial(
     BaseNavigationTask,
     target_object_name=name_fridge,
     goal_tolerance=1.3,
     termination_config={"max_steps": 10000},
 )
 
-open_fridge = partial(
+cb_open_fridge = partial(
     SufficientlyOpenTask,
     target_object_name=name_fridge,
     allowed_deg=80,
     termination_config={"max_steps": 10000},
 )
 
-close_fridge = partial(
+cb_close_fridge = partial(
     SufficientlyClosedTask,
     target_object_name=name_fridge,
     allowed_deg=0,
     termination_config={"max_steps": 10000},
 )
 
-move_to_counter_top = partial(
+cb_move_to_counter_top = partial(
     BaseNavigationTask,
     target_object_name=name_countertop,
     goal_tolerance=1,
@@ -103,7 +103,7 @@ move_to_counter_top = partial(
     ],
 )
 
-place_next_to_burner = partial(
+cb_place_next_to_burner = partial(
     NextToTask,
     target_object_name=name_tray,
     source_object_name=name_burner,
@@ -111,7 +111,7 @@ place_next_to_burner = partial(
     termination_config={"max_steps": 10000},
 )
 
-move_to_frying_pan = partial(
+cb_move_to_frying_pan = partial(
     MoveEEToObjectTask,
     target_object_name=name_pan,
     goal_tolerance=0.05,
@@ -119,7 +119,7 @@ move_to_frying_pan = partial(
     skip_collision_with_objs=[name_pan],
 )
 
-move_to_tray = partial(
+cb_move_to_tray = partial(
     MoveEEToObjectTask,
     target_object_name=name_tray,
     goal_tolerance=0.05,
@@ -127,20 +127,20 @@ move_to_tray = partial(
     skip_collision_with_objs=[name_tray],
 )
 
-place_frying_pan = partial(
+cb_place_frying_pan = partial(
     OnTopStableTask,
     target_object_name=name_burner,
     source_object_name=name_pan,
     termination_config={"max_steps": 10000},
 )
 
-burner_on = partial(
+cb_burner_on = partial(
     OnTask,
     target_object_name=name_burner,
     termination_config={"max_steps": 10000},
 )
 
-pour_tray = partial(
+cb_pour_tray = partial(
     OnTopTask,
     target_object_name=name_bacon_3,
     source_object_name=name_pan,
@@ -148,33 +148,218 @@ pour_tray = partial(
     termination_config={"max_steps": 10000},
 )
 
-grasp_tray = partial(
+cb_grasp_tray = partial(
     RobustGraspTask,
     obj_name=name_tray,
     termination_config={"max_steps": 10000},
 )
 
-grasp_pan = partial(
+cb_grasp_pan = partial(
     RobustGraspTask,
     obj_name=name_pan,
     termination_config={"max_steps": 10000},
 )
 
 stages = [
-    {"name": "move_to_fridge", "factory": move_to_fridge},
-    {"name": "open_fridge", "factory": open_fridge},
-    {"name": "pick_tray", "factory": grasp_tray},
-    {"name": "close_fridge", "factory": close_fridge},
-    {"name": "move_to_counter_top", "factory": move_to_counter_top},
-    {"name": "place_on_next_to_burner1", "factory": place_next_to_burner},
-    {"name": "Move_to_frying_pan", "factory": move_to_frying_pan},
-    {"name": "pick_up_frying_pan", "factory": grasp_pan},
-    {"name": "place_frying_pan", "factory": place_frying_pan},
-    {"name": "move_to_tray", "factory": move_to_tray},
-    {"name": "pick_up_tray", "factory": grasp_tray},
-    {"name": "pour_tray", "factory": pour_tray},
-    {"name": "place_on_next_to_burner2", "factory": place_next_to_burner},
-    {"name": "burner_on_switch", "factory": burner_on},
+    {"name": "move_to_fridge", "factory": cb_move_to_fridge},
+    {"name": "open_fridge", "factory": cb_open_fridge},
+    {"name": "pick_tray", "factory": cb_grasp_tray},
+    {"name": "close_fridge", "factory": cb_close_fridge},
+    {"name": "move_to_counter_top", "factory": cb_move_to_counter_top},
+    {"name": "place_on_next_to_burner1", "factory": cb_place_next_to_burner},
+    {"name": "Move_to_frying_pan", "factory": cb_move_to_frying_pan},
+    {"name": "pick_up_frying_pan", "factory": cb_grasp_pan},
+    {"name": "place_frying_pan", "factory": cb_place_frying_pan},
+    {"name": "move_to_tray", "factory": cb_move_to_tray},
+    {"name": "pick_up_tray", "factory": cb_grasp_tray},
+    {"name": "pour_tray", "factory": cb_pour_tray},
+    {"name": "place_on_next_to_burner2", "factory": cb_place_next_to_burner},
+    {"name": "burner_on_switch", "factory": cb_burner_on},
 ]
 
 task_factory.update({"cook_bacon": stages})
+
+
+# -----freeze_pies-----
+
+name_cabinet = "bottom_cabinet_no_top_gjeoer_0"
+name_fridge = "fridge_dszchb_0"
+name_countertop = "countertop_kelzer_0"
+name_tupperware_1 = "tupperware_230"
+name_tupperware_2 = "tupperware_231"
+name_apple_pie_1 = "apple_pie_235"
+name_apple_pie_2 = "apple_pie_234"
+
+
+fp_move_to_cabinet = partial(
+    BaseNavigationTask,
+    target_object_name=name_cabinet,
+    goal_tolerance=1.3,
+    termination_config={"max_steps": 10000},
+)
+
+fp_move_to_fridge = partial(
+    BaseNavigationTask,
+    target_object_name=name_fridge,
+    goal_tolerance=1.3,
+    termination_config={"max_steps": 10000},
+)
+
+fp_open_cabinet = partial(
+    SufficientlyOpenTask,
+    target_object_name=name_cabinet,
+    allowed_deg=80,
+    termination_config={"max_steps": 10000},
+)
+
+fp_close_cabinet = partial(
+    SufficientlyClosedTask,
+    target_object_name=name_cabinet,
+    allowed_deg=0,
+    termination_config={"max_steps": 10000},
+)
+
+fp_close_fridge = partial(
+    SufficientlyClosedTask,
+    target_object_name=name_fridge,
+    allowed_deg=0,
+    termination_config={"max_steps": 10000},
+)
+
+fp_open_fridge = partial(
+    SufficientlyOpenTask,
+    target_object_name=name_fridge,
+    allowed_deg=80,
+    termination_config={"max_steps": 10000},
+)
+
+fp_grasp_tupperware_1 = partial(
+    RobustGraspTask,
+    obj_name=name_tupperware_1,
+    termination_config={"max_steps": 5000},
+    transform_matrix=None,
+)
+
+fp_grasp_tupperware_2 = partial(
+    RobustGraspTask,
+    obj_name=name_tupperware_2,
+    termination_config={"max_steps": 5000},
+    transform_matrix=None,
+)
+
+fp_move_to_counter_top = partial(
+    BaseNavigationTask,
+    target_object_name=name_countertop,
+    goal_tolerance=1,
+    termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[],
+)
+
+fp_move_to_apple_pie_2 = partial(
+    BaseNavigationTask,
+    target_object_name=name_apple_pie_2,
+    goal_tolerance=1,
+    termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[],
+)
+
+fp_place_tupperware_1_countertop = partial(
+    OnTopStableTask,
+    target_object_name=name_countertop,
+    source_object_name=name_tupperware_1,
+    termination_config={"max_steps": 10000},
+)
+
+fp_place_tupperware_2_countertop = partial(
+    OnTopStableTask,
+    target_object_name=name_countertop,
+    source_object_name=name_tupperware_2,
+    termination_config={"max_steps": 10000},
+)
+
+fp_grasp_apple_pie_1 = partial(
+    RobustGraspTask,
+    obj_name=name_apple_pie_1,
+    termination_config={"max_steps": 10000},
+)
+
+fp_grasp_apple_pie_2 = partial(
+    RobustGraspTask,
+    obj_name=name_apple_pie_2,
+    termination_config={"max_steps": 10000},
+)
+
+
+fp_place_apple_pie_1 = partial(
+    InsideTask,
+    target_object_name=name_tupperware_1,
+    source_object_name=name_apple_pie_1,
+    termination_config={"max_steps": 10000},
+)
+
+fp_place_apple_pie_2 = partial(
+    InsideTask,
+    target_object_name=name_tupperware_2,
+    source_object_name=name_apple_pie_2,
+    termination_config={"max_steps": 10000},
+)
+
+fp_move_to_tupperware_1 = partial(
+    MoveEEToObjectTask,
+    target_object_name=name_tupperware_1,
+    goal_tolerance=0.05,
+    termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[name_tray],
+)
+
+fp_move_to_tupperware_2 = partial(
+    MoveEEToObjectTask,
+    target_object_name=name_tupperware_2,
+    goal_tolerance=0.05,
+    termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[name_tray],
+)
+
+fp_place_tupperware_1_fridge = partial(
+    InsideTask,
+    target_object_name=name_fridge,
+    source_object_name=name_tupperware_1,
+    termination_config={"max_steps": 10000},
+)
+
+fp_place_tupperware_2_fridge = partial(
+    InsideTask,
+    target_object_name=name_fridge,
+    source_object_name=name_tupperware_2,
+    termination_config={"max_steps": 10000},
+)
+
+stages = [
+    {"name": "move_to_cabinet", "kind": "task", "factory": fp_move_to_cabinet},
+    {"name": "open_cabinet_door", "kind": "task", "factory": fp_open_cabinet},
+    {"name": "pick_up_tupperware", "kind": "task", "factory": fp_grasp_tupperware_1},
+    {"name": "close_cabinet_door", "kind": "task", "factory": fp_close_cabinet},
+    {"name": "move_to_counter_top", "kind": "task", "factory": fp_move_to_counter_top},
+    {"name": "place_tupperware", "kind": "task", "factory": fp_place_tupperware_1_countertop},
+    {"name": "pick_up_apple_pie", "kind": "task", "factory": fp_grasp_apple_pie_1},
+    {"name": "place_in_apple_pie", "kind": "task", "factory": fp_place_apple_pie_1},
+    {"name": "move_to_cabinet", "kind": "task", "factory": fp_move_to_cabinet},
+    {"name": "open_cabinet_door", "kind": "task", "factory": fp_open_cabinet},
+    {"name": "pick_up_tupperware", "kind": "task", "factory": fp_grasp_tupperware_2},
+    {"name": "close_cabinet_door", "kind": "task", "factory": fp_close_cabinet},
+    {"name": "move_to_counter_top", "kind": "task", "factory": fp_move_to_counter_top},
+    {"name": "place_tupperware", "kind": "task", "factory": fp_place_tupperware_2_countertop},
+    {"name": "move_to_apple_pie", "kind": "task", "factory": fp_move_to_apple_pie_2},
+    {"name": "pick_up_apple_pie", "kind": "task", "factory": fp_grasp_apple_pie_2},
+    {"name": "place_in_apple_pie", "kind": "task", "factory": fp_place_apple_pie_2},
+    {"name": "Move_to_fridge", "kind": "task", "factory": fp_move_to_fridge},
+    {"name": "open_frideg_door", "kind": "task", "factory": fp_open_fridge},
+    {"name": "move_to_tupperware", "kind": "task", "factory": fp_move_to_tupperware_2},
+    {"name": "pick_up_tupperware", "kind": "task", "factory": fp_grasp_tupperware_1},
+    {"name": "pick_up_tupperware", "kind": "task", "factory": fp_grasp_tupperware_2},
+    {"name": "move_to_frideg", "kind": "task", "factory": fp_move_to_fridge},
+    {"name": "place_in_tupperware_1", "kind": "task", "factory": fp_place_tupperware_1_fridge},
+    {"name": "place_in_tupperware_2", "kind": "task", "factory": fp_place_tupperware_2_fridge},
+    {"name": "close_fridge_door", "kind": "task", "factory": fp_close_fridge},
+]
+task_factory.update({"freeze_pies": stages})

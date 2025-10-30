@@ -4,6 +4,7 @@ from omnigibson.tasks.custom_base_navigation_task import BaseNavigationTask
 from omnigibson.tasks.task_utils import _get_named, _front_target
 from omnigibson.termination_conditions.point_goal import PointGoal
 from omnigibson.termination_conditions.termination_condition_base import SuccessCondition
+from omnigibson.termination_conditions.falling import ObjectFalling
 
 
 class EEFsReachingTask(BaseNavigationTask):
@@ -181,4 +182,5 @@ class MoveEEToObjectTask(EEFsReachingTask):
             self._target_object_name,
             self._goal_tolerance,
         )
+        terms["object_falling"] = ObjectFalling(obj_name=self._obj_name, fall_height=self._termination_config["fall_height"])
         return terms
