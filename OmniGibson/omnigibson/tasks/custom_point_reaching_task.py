@@ -182,5 +182,5 @@ class MoveEEToObjectTask(EEFsReachingTask):
             self._target_object_name,
             self._goal_tolerance,
         )
-        terms["object_falling"] = ObjectFalling(obj_name=self._obj_name, fall_height=self._termination_config["fall_height"])
+        terms["object_falling"] = ObjectFalling(obj_name=self._target_object_name, fall_height=self._termination_config["fall_height"])
         return terms
