@@ -1,3 +1,3 @@
 [submodule "OmniGibson/omnigibson/Behavior-Dreamer"]
 	path = OmniGibson/omnigibson/Behavior-Dreamer
-	url = git@github.com:BBBBBBob/Behavior-Dreamer.git
+	url = https://github.com/BBBBBBob/Behavior-Dreamer
