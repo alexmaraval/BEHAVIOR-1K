@@ -45,11 +45,14 @@ from omnigibson.learning.utils.obs_utils import (
 )
 
 sys.path.append(str(Path(__file__).parent.parent / 'Behavior-Dreamer'))
+sys.path.append(str(Path(__file__).parent.parent / 'Behavior-Dreamer/behavior1k'))
 from dreamer_training_utils import (
     reward_base_vel_change_regularization,
     reward_arm_pos_change_regularization,
-    reward_arm_vel_regularization
+    reward_arm_vel_regularization,
+    reward_arm_vel_change_regularization
 )
+from b1k.diffik import WholeBodyDifferentialIK
 
 gm.ENABLE_FLATCACHE = True
 gm.USE_GPU_DYNAMICS = False
@@ -739,7 +742,269 @@ class TaskEnv:
 
         return scene_data
 
+class TaskIKEnv(TaskEnv):
+    """
+    A wrapper environment for managing a multi-stage robotic task composed of multiple subtasks with IK solver.
+    """
+    def __init__(self,
+            config: dict[str, ...],
+            motor_type: str = "position",
+            instance_id: int | None = None,
+            max_steps: int | None = None,
+            use_domain_randomization: bool = False,
+    ) -> None:
+        super().__init__(config=config,
+                         mortor_type=motor_type,
+                         instance_id=instance_id,
+                         max_steps=max_steps,
+                         use_domain_randomization=use_domain_randomization)
+        
+        ### initialize IK solver
+        self.dt = 1/120
+        self.diffik = WholeBodyDifferentialIK(self.dt)
+        
+        ## weight on the end-effector
+        self.w_left = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        self.w_right = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
+        ## weight on the velocity
+        w_dq_arm = [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
+        self.w_dq = [1.0, 1.0, 1.0, 1.0] + w_dq_arm + w_dq_arm
+
+    def step(self, action):
+        ### action is tensor 
+        action = action["robot_r1"].numpy() if isinstance(action, dict) else action.numpy()
+
+        target_left = action[..., 3:9]
+        target_right = action[..., 9:15]
+        current_q = self.current_upper_joint.copy()
+        config = {
+                "vG_left": target_left,
+                "vG_right": target_right,
+                "w_left": self.w_left,
+                "w_right": self.w_right,
+                "w_dq": self.w_dq,
+                "q": current_q
+            }
+        self.diffik.reset(config)
+        if self.diffik.solve():
+            dq = self.diffik.get_solution()
+            next_q = self.current_upper_joint + dq * self.dt ## trunk + left_arm + right_arm
+        else:
+            print("Cannot find the solution! The upper body will remain as the same as the previous step!")
+            next_q = current_q
+
+        action = torch.from_numpy(np.concatenate([action[..., :3],
+                                next_q[..., :4],
+                                next_q[..., 4:11],
+                                action[..., 15:16],
+                                next_q[..., 11:18],
+                                action[..., 16:17]], axis=-1))
+
+        obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
+        obs["is_terminal"] = terminated_env or truncated_env
+        obs["is_first"] = False
+        self.current_upper_joint = torch.cat([obs["robot_r1"]["proprio"][..., 236:240],
+                                          obs["robot_r1"]["proprio"][..., 158:165],
+                                          obs["robot_r1"]["proprio"][..., 197:204],
+                                           ], dim=-1).detach().cpu().numpy()
+        
+        if self.cfg.robot.controllers.use_reward_regularization:
+            self.curr_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
+            self.curr_ang_velocity_base = obs["robot_r1"]["proprio"][..., 155:158]
+            self.curr_velocity_left_arm = obs["robot_r1"]["proprio"][..., 179:186]
+            self.curr_velocity_right_arm = obs["robot_r1"]["proprio"][..., 218:225]
+            self.curr_velocity_torso = obs["robot_r1"]["proprio"][..., 240:244]
+            self.curr_velocity_left_gripper = obs["robot_r1"]["proprio"][..., 195:197]
+            self.curr_velocity_right_gripper = obs["robot_r1"]["proprio"][..., 234:236]
+            self.curr_angle_left_arm = obs["robot_r1"]["proprio"][..., 158:165]
+            self.curr_angle_right_arm = obs["robot_r1"]["proprio"][..., 197:204]
+            self.curr_angle_torso = obs["robot_r1"]["proprio"][..., 236:240]
+            self.curr_angle_left_gripper = obs["robot_r1"]["proprio"][..., 193:195]
+            self.curr_angle_right_gripper = obs["robot_r1"]["proprio"][..., 232:234]
+
+            prev = torch.cat([self.prev_lin_velocity_base, self.prev_ang_velocity_base], dim=-1)
+            curr = torch.cat([self.curr_lin_velocity_base, self.curr_ang_velocity_base], dim=-1)
+            base_velocity_change_reg = reward_base_vel_change_regularization(prev, curr)
+
+            curr = torch.cat([
+                self.curr_velocity_left_arm,
+                self.curr_velocity_right_arm,
+                self.curr_velocity_torso,
+                self.curr_velocity_left_gripper,
+                self.curr_velocity_right_gripper,
+            ], dim=-1)
+            arm_velocity_reg = reward_arm_vel_regularization(curr)
+
+            prev = torch.cat([
+                self.prev_angle_left_arm,
+                self.prev_angle_right_arm,
+                self.prev_angle_torso,
+                self.prev_angle_left_gripper,
+                self.prev_angle_right_gripper,
+            ], dim=-1)
+            curr = torch.cat([
+                self.curr_angle_left_arm,
+                self.curr_angle_right_arm,
+                self.curr_angle_torso,
+                self.curr_angle_left_gripper,
+                self.curr_angle_right_gripper,
+            ], dim=-1)
+            arm_position_change_reg = reward_arm_pos_change_regularization(prev, curr)
+            reward_env += (
+                            0.05 * base_velocity_change_reg + 0.05 * arm_velocity_reg + 0.05 * arm_position_change_reg
+                          )
+
+            self.prev_lin_velocity_base = self.curr_lin_velocity_base
+            self.prev_ang_velocity_base = self.curr_ang_velocity_base
+            self.prev_velocity_left_arm = self.curr_velocity_left_arm
+            self.prev_velocity_right_arm = self.curr_velocity_right_arm
+            self.prev_velocity_torso = self.curr_velocity_torso
+            self.prev_velocity_left_gripper = self.curr_velocity_left_gripper
+            self.prev_velocity_right_gripper = self.curr_velocity_right_gripper
+            self.prev_angle_left_arm = self.curr_angle_left_arm
+            self.prev_angle_right_arm = self.curr_angle_right_arm
+            self.prev_angle_torso = self.curr_angle_torso
+            self.prev_angle_left_gripper = self.curr_angle_left_gripper
+            self.prev_angle_right_gripper = self.curr_angle_right_gripper
+
+        obs = self._preprocess_obs(obs)
+        self._write_video(obs)
+
+        # Create sub task info
+        subtask_info = {
+            "name": None,
+            "index": self._stage_idx,
+            "index_onehot": torch.nn.functional.one_hot(
+                torch.tensor(self._stage_idx).to(torch.long), num_classes=len(self.subtasks)
+            ),
+            "reward": 0.0,
+            "done": False,
+            "success": False,
+            "timeout": False,
+            "falling": False,
+            "max_collision": False,
+        }
+
+        sub_task_terminated = False
+        if self.task_combo is not None and self.subtasks:
+            rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
+            info_s = info_s or {}
+            success = bool(info_s["done"]["success"])
+            self._stage_idx = min(self.task_combo.current_index, len(self.subtasks))
+            name = None
+            if self._stage_idx < len(self.subtasks):
+                name = self._task_stages[self._stage_idx]["name"]
+
+            falling = False
+            max_collision = False
+            timeout = False
+            try:
+                if "falling" in info_s["done"]["termination_conditions"]:
+                    falling = info_s["done"]["termination_conditions"]["falling"]["done"]
+            except Exception as e:
+                print(f"Stage {name}, falling check error: {e}")
+
+            try:
+                if "max_collision" in info_s["done"]["termination_conditions"]:
+                    max_collision = info_s["done"]["termination_conditions"]["max_collision"]["done"]
+            except Exception as e:
+                print(f"Stage {name}, max_collision check error: {e}")
+
+            try:
+                if "timeout" in info_s["done"]["termination_conditions"]:
+                    timeout = info_s["done"]["termination_conditions"]["timeout"]["done"]
+            except Exception as e:
+                print(f"Stage {name}, timeout check error: {e}")
+
+            sub_task_terminated = any([falling, max_collision, timeout])
+
+            subtask_info.update(
+                name=name,
+                reward=float(rew_s),
+                done=success or combo_done,
+                success=success,
+                timeout=False if success else timeout,
+                falling=False if success else falling,
+                max_collision=False if success else max_collision,
+                index=self._stage_idx,
+                index_onehot=torch.nn.functional.one_hot(
+                    torch.tensor(self._stage_idx).to(torch.long), num_classes=len(self.subtasks)
+                )
+            )
+
+            reward_env += float(rew_s)
+
+            if combo_done:
+                self._completed = True
+        else:
+            self._completed = True
+
+        # Compose info
+        info_out = info_env
+        info_out["subtask"] = subtask_info
+        info_out["all_subtasks_complete"] = self._completed
+        terminated_env = terminated_env or sub_task_terminated
+
+        if terminated_env:
+            if info_out["subtask"]["success"]:
+                print(
+                    f"Subtask {self._stage_idx} done! {len(self.subtasks) - self._stage_idx - 1} more to go.\n"
+                    f"Collected subtask {self._stage_idx} reward: {info_out['subtask']['reward']}",
+                    flush=True,
+                )
+            else:
+                print(f"Subtask {self.active_subtask} terminated.\n{info_s['done']}", flush=True)
+
+        return obs, reward_env, terminated_env, truncated_env, info_out
+
+    def reset(self):
+        self.load_task_instance()
+        obs, info = self._env.reset()
+
+        self.current_upper_joint = torch.cat([obs["robot_r1"]["proprio"][..., 236:240],
+                                          obs["robot_r1"]["proprio"][..., 158:165],
+                                          obs["robot_r1"]["proprio"][..., 197:204],
+                                           ], dim=-1).detach().cpu().numpy()
+        
+        self.prev_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
+        self.prev_ang_velocity_base = obs["robot_r1"]["proprio"][..., 155:158]
+        self.prev_velocity_left_arm = obs["robot_r1"]["proprio"][..., 179:186]
+        self.prev_velocity_right_arm = obs["robot_r1"]["proprio"][..., 218:225]
+        self.prev_velocity_torso = obs["robot_r1"]["proprio"][..., 240:244]
+        self.prev_velocity_left_gripper = obs["robot_r1"]["proprio"][..., 195:197]
+        self.prev_velocity_right_gripper = obs["robot_r1"]["proprio"][..., 234:236]
+        self.prev_angle_left_arm = obs["robot_r1"]["proprio"][..., 158:165]
+        self.prev_angle_right_arm = obs["robot_r1"]["proprio"][..., 197:204]
+        self.prev_angle_torso = obs["robot_r1"]["proprio"][..., 236:240]
+        self.prev_angle_left_gripper = obs["robot_r1"]["proprio"][..., 193:195]
+        self.prev_angle_right_gripper = obs["robot_r1"]["proprio"][..., 232:234]
+
+        self.curr_lin_velocity_base = None
+        self.curr_ang_velocity_base = None
+        self.curr_velocity_left_arm = None
+        self.curr_velocity_right_arm = None
+        self.curr_velocity_torso = None
+        self.curr_velocity_left_gripper = None
+        self.curr_velocity_right_gripper = None
+        self.curr_angle_left_arm = None
+        self.curr_angle_right_arm = None
+        self.curr_angle_torso = None
+        self.curr_angle_left_gripper = None
+        self.curr_angle_right_gripper = None
+
+        obs = self._preprocess_obs(obs)
+        obs["is_terminal"] = False
+        obs["is_first"] = True
+
+        if self.task_combo is not None:
+            self.task_combo.reset(self._env)
+        self._reset_subtask_progress()
+        obs["subtask_id"] = torch.nn.functional.one_hot(
+            torch.tensor(0).to(torch.long), num_classes=len(self.subtasks)
+        )
+
+        return obs
 # ----- Utilities to drive the example code-----
 
 
