@@ -454,7 +454,7 @@ class TaskEnv:
             ], dim=-1)
             arm_position_change_reg = reward_arm_pos_change_regularization(prev, curr)
             reward_env += (
-                                  0.1 * base_velocity_change_reg + 0.0001 * arm_velocity_reg + 0.1 * arm_position_change_reg
+                            0.1 * base_velocity_change_reg + 0.0001 * arm_velocity_reg + 0.1 * arm_position_change_reg
                           ) / 10.0
 
             self.prev_lin_velocity_base = self.curr_lin_velocity_base
@@ -535,6 +535,8 @@ class TaskEnv:
                 )
             )
 
+            reward_env += float(rew_s)
+
             if combo_done:
                 self._completed = True
         else:
@@ -545,6 +547,16 @@ class TaskEnv:
         info_out["subtask"] = subtask_info
         info_out["all_subtasks_complete"] = self._completed
         terminated_env = terminated_env or sub_task_terminated
+
+        if terminated_env:
+            if info_out["subtask"]["success"]:
+                print(
+                    f"Subtask {self._stage_idx} done! {len(self.subtasks) - self._stage_idx - 1} more to go.\n"
+                    f"Collected subtask {self._stage_idx} reward: {info_out['subtask']['reward']}",
+                    flush=True,
+                )
+            else:
+                print(f"Subtask {self.active_subtask} terminated.\n{info_s['done']}", flush=True)
 
         return obs, reward_env, terminated_env, truncated_env, info_out
 
