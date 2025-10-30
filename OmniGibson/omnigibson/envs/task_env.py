@@ -546,7 +546,7 @@ class TaskEnv:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
             info_s = info_s or {}
             success = bool(info_s["done"]["success"])
-            self._stage_idx = min(self.task_combo.current_index, len(self.subtasks))
+            self._stage_idx = min(self.task_combo.current_index, len(self.subtasks) - 1)
             name = None
             if self._stage_idx < len(self.subtasks):
                 name = self._task_stages[self._stage_idx]["name"]
