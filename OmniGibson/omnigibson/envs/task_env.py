@@ -402,9 +402,12 @@ class TaskEnv:
         Returns:
              The initial observation from the environment after reset.
         """
-        self.frames = None
+        self.load_robot()
         self.load_task_instance()
+        self.set_subtasks()
         obs, info = self._env.reset()
+
+        self.frames = None
 
         self.prev_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
         self.prev_ang_velocity_base = obs["robot_r1"]["proprio"][..., 155:158]
