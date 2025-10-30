@@ -56,6 +56,57 @@ gm.USE_GPU_DYNAMICS = False
 gm.ENABLE_TRANSITION_RULES = True
 
 
+def look_at_quat(eye, target, up=torch.tensor([0.0, 0.0, 1.0])):
+    """
+    Calculates the orientation quaternion to make a camera at `eye` point towards a `target`.
+    Args:
+        eye (torch.Tensor): The position of the camera.
+        target (torch.Tensor): The position to look at.
+        up (torch.Tensor): The world's up direction vector.
+    Returns:
+        torch.Tensor: A quaternion (wxyz) for the orientation.
+    """
+    # 1. Calculate direction vectors
+    forward = torch.nn.functional.normalize(target - eye, dim=-1)
+    right = torch.nn.functional.normalize(torch.cross(up, forward), dim=-1)
+    up_cam = torch.cross(right, forward)
+
+    # 2. Create a rotation matric from the direction vectors
+    # The matrix columns are the basis vectors [right, up, -forward]
+    # for a camera's local coordinate system.
+    rot_matrix = torch.stack((right, up_cam, -forward), dim=-1)
+
+    # 3. Convert rotation matrix to quaternion (wxyz format)
+    # This is a standard and robust algorithm for the conversion.
+    trace = torch.trace(rot_matrix)
+    if trace > 0:
+        s = 0.5 / torch.sqrt(trace + 1.0)
+        w = 0.25 / s
+        x = (rot_matrix[2, 1] - rot_matrix[1, 2]) * s
+        y = (rot_matrix[0, 2] - rot_matrix[2, 0]) * s
+        z = (rot_matrix[1, 0] - rot_matrix[0, 1]) * s
+    else:
+        if rot_matrix[0, 0] > rot_matrix[1, 1] and rot_matrix[0, 0] > rot_matrix[2, 2]:
+            s = 2.0 * torch.sqrt(1.0 + rot_matrix[0, 0] - rot_matrix[1, 1] - rot_matrix[2, 2])
+            w = (rot_matrix[2, 1] - rot_matrix[1, 2]) / s
+            x = 0.25 * s
+            y = (rot_matrix[0, 1] + rot_matrix[1, 0]) / s
+            z = (rot_matrix[0, 2] + rot_matrix[2, 0]) / s
+        elif rot_matrix[1, 1] > rot_matrix[2, 2]:
+            s = 2.0 * torch.sqrt(1.0 + rot_matrix[1, 1] - rot_matrix[0, 0] - rot_matrix[2, 2])
+            w = (rot_matrix[0, 2] - rot_matrix[2, 0]) / s
+            x = (rot_matrix[0, 1] + rot_matrix[1, 0]) / s
+            y = 0.25 * s
+            z = (rot_matrix[1, 2] - rot_matrix[2, 1]) / s
+        else:
+            s = 2.0 * torch.sqrt(1.0 + rot_matrix[2, 2] - rot_matrix[0, 0] - rot_matrix[1, 1])
+            w = (rot_matrix[1, 0] - rot_matrix[0, 1]) / s
+            x = (rot_matrix[0, 2] + rot_matrix[2, 0]) / s
+            y = (rot_matrix[1, 2] + rot_matrix[2, 1]) / s
+            z = 0.25 * s
+    return torch.tensor([w, x, y, z])
+
+
 class TaskCombination:
     """
     Managing and executing a sequence of subtasks in combination.
@@ -144,7 +195,6 @@ class TaskEnv:
             max_steps: Maximum number of simulation steps before termination.
             use_domain_randomization: Whether to apply domain randomization. Default is False.
         """
-        self.obs = None
         self.cfg = config.get("config")
         assert self.cfg is not None, "You must pass the main config object under the 'config' key in config."
         self.task_name = self.cfg.task.name
@@ -161,8 +211,11 @@ class TaskEnv:
             video_path = Path(self.cfg.log_path).expanduser() / "videos"
             video_path.mkdir(parents=True, exist_ok=True)
             date_str = datetime.now().strftime("%Y%m%d")
-            video_name = str(video_path) + f"/{self.task_name}_{date_str}.mp4"
-            self._video_writer = create_video_writer(fpath=video_name, resolution=(448, 672))
+            video_name = str(video_path) + f"/{self.task_name}_{date_str}.mkv"
+            self._video_writer = create_video_writer(fpath=video_name, resolution=(448, 1120))
+            self.frames = []
+        else:
+            self.frames = None
 
         self.subtasks = []
         self._task_stages = None
@@ -349,6 +402,7 @@ class TaskEnv:
         Returns:
              The initial observation from the environment after reset.
         """
+        self.frames = None
         self.load_task_instance()
         obs, info = self._env.reset()
 
@@ -454,7 +508,7 @@ class TaskEnv:
             ], dim=-1)
             arm_position_change_reg = reward_arm_pos_change_regularization(prev, curr)
             reward_env += (
-                            0.1 * base_velocity_change_reg + 0.0001 * arm_velocity_reg + 0.1 * arm_position_change_reg
+                                  0.1 * base_velocity_change_reg + 0.0001 * arm_velocity_reg + 0.1 * arm_position_change_reg
                           ) / 10.0
 
             self.prev_lin_velocity_base = self.curr_lin_velocity_base
@@ -471,7 +525,6 @@ class TaskEnv:
             self.prev_angle_right_gripper = self.curr_angle_right_gripper
 
         obs = self._preprocess_obs(obs)
-        self._write_video(obs)
 
         # Create sub task info
         subtask_info = {
@@ -558,6 +611,8 @@ class TaskEnv:
             else:
                 print(f"Subtask {self.active_subtask} terminated.\n{info_s['done']}", flush=True)
 
+        self._write_video(obs, done=terminated_env or truncated_env)
+
         return obs, reward_env, terminated_env, truncated_env, info_out
 
     def close(self) -> None:
@@ -641,7 +696,7 @@ class TaskEnv:
                 obs[k] = self._preprocess_rgb(obs[k])
         return obs
 
-    def _write_video(self, obs) -> None:
+    def _write_video(self, obs, done: bool = False) -> None:
         """
         Write the current robot observations to video.
         """
@@ -659,12 +714,30 @@ class TaskEnv:
                 obs[ROBOT_CAMERA_NAMES["R1Pro"]["head"] + "::rgb"].numpy(),
                 (448, 448),
             )
-            write_video(
-                np.expand_dims(np.hstack([np.vstack([left_wrist_rgb, right_wrist_rgb]), head_rgb]), 0),
-                video_writer=self._video_writer,
-                batch_size=1,
-                mode="rgb",
-            )
+
+            # get 4th point of view external to robot
+            robot_pos, _ = self._robot.get_position_orientation()
+            camera_offset = torch.tensor([-1.5, -1.5, 2.0])
+            camera_position = robot_pos + camera_offset
+            camera_orientation = look_at_quat(eye=camera_position, target=robot_pos)
+            og.sim.viewer_camera.set_position_orientation(camera_position, camera_orientation)
+            viewer_rgb = cv2.resize(og.sim.viewer_camera.get_obs()[0]['rgb'].numpy()[..., :-1], (448, 448))
+
+            # accumulate frames until writing full video
+            frame = np.hstack([np.vstack([left_wrist_rgb, right_wrist_rgb]), head_rgb, viewer_rgb])
+            frame = np.expand_dims(frame, 0)
+            if self.frames is not None and len(self.frames) > 0:
+                self.frames = np.concatenate([self.frames, frame], axis=0)
+            else:
+                self.frames = frame
+
+            if done:
+                write_video(
+                    self.frames,
+                    video_writer=self._video_writer,
+                    batch_size=1,
+                    mode="rgb",
+                )
 
     @staticmethod
     def collect_tokens_and_entries(data: dict) -> tuple[dict[str, dict], dict]:
