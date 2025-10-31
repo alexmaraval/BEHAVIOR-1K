@@ -400,9 +400,9 @@ class TaskEnv:
         Returns:
              The initial observation from the environment after reset.
         """
-        self.load_task_instance()
         self._env.robots[0].reset()
         obs, info = self._env.reset()
+        self.load_task_instance()
 
         self.frames = None
 
@@ -621,7 +621,6 @@ class TaskEnv:
         Returns:
             None
         """
-        self._video_writer = None
         self._env.close()
         og.shutdown()
 
@@ -732,9 +731,12 @@ class TaskEnv:
                 self.frames = frame
 
             if done:
+                date_str = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+                video_name = str(self.video_path) + f"/{self.task_name}_{date_str}.mkv"
+                video_writer = self._video_writer_factory(video_name)
                 write_video(
                     self.frames,
-                    video_writer=self._video_writer,
+                    video_writer=video_writer,
                     batch_size=1,
                     mode="rgb",
                 )
