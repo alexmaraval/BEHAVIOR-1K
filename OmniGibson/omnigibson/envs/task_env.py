@@ -353,6 +353,8 @@ class TaskEnv:
              The initial observation from the environment after reset.
         """
         self.load_task_instance()
+        self._env.robots[0].reset()
+
         obs, info = self._env.reset()
 
         self.prev_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
@@ -754,7 +756,7 @@ class TaskIKEnv(TaskEnv):
             use_domain_randomization: bool = False,
     ) -> None:
         super().__init__(config=config,
-                         mortor_type=motor_type,
+                         motor_type=motor_type,
                          instance_id=instance_id,
                          max_steps=max_steps,
                          use_domain_randomization=use_domain_randomization)
@@ -960,6 +962,7 @@ class TaskIKEnv(TaskEnv):
 
     def reset(self):
         self.load_task_instance()
+        self._env.robots[0].reset()
         obs, info = self._env.reset()
 
         self.current_upper_joint = torch.cat([obs["robot_r1"]["proprio"][..., 236:240],
