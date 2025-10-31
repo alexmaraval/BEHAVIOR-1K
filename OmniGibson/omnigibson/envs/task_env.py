@@ -208,11 +208,9 @@ class TaskEnv:
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
         if self.cfg.write_video:
-            video_path = Path(self.cfg.log_path).expanduser() / "videos"
-            video_path.mkdir(parents=True, exist_ok=True)
-            date_str = datetime.now().strftime("%Y%m%d")
-            video_name = str(video_path) + f"/{self.task_name}_{date_str}.mkv"
-            self._video_writer = create_video_writer(fpath=video_name, resolution=(448, 1120))
+            self.video_path = Path(self.cfg.log_path).expanduser() / "videos"
+            self.video_path.mkdir(parents=True, exist_ok=True)
+            self._video_writer_factory = lambda fpath: create_video_writer(fpath=fpath, resolution=(448, 1120))
             self.frames = []
         else:
             self.frames = None
@@ -402,9 +400,8 @@ class TaskEnv:
         Returns:
              The initial observation from the environment after reset.
         """
-        self.load_robot()
         self.load_task_instance()
-        self.set_subtasks()
+        self._env.robots[0].reset()
         obs, info = self._env.reset()
 
         self.frames = None
