@@ -8,29 +8,18 @@ from pathlib import Path
 import cv2
 import math
 import numpy as np
-import torch
-import torch as th
-from hydra.utils import instantiate
-
-# sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
-
 import omnigibson as og
 import omnigibson.utils.transform_utils as T
-from omnigibson.macros import gm
-from omnigibson.envs.env_wrapper import EnvironmentWrapper
-
+import torch
+import torch as th
 from gello.robots.sim_robot.og_teleop_utils import (
     augment_rooms,
     load_available_tasks,
     generate_robot_config,
     get_task_relevant_room_types,
 )
-from omnigibson.utils.asset_utils import get_task_instance_path
-from omnigibson.utils.python_utils import recursively_convert_to_torch
-from omnigibson.tasks.task_factory import get_sub_tasks
-from omnigibson.robots import BaseRobot
-from rich.table import Table
-
+from hydra.utils import instantiate
+from omnigibson.envs.env_wrapper import EnvironmentWrapper
 from omnigibson.learning.utils.eval_utils import (
     ROBOT_CAMERA_NAMES,
     PROPRIOCEPTION_INDICES,
@@ -38,11 +27,18 @@ from omnigibson.learning.utils.eval_utils import (
     flatten_obs_dict,
     TASK_NAMES_TO_INDICES,
 )
-
 from omnigibson.learning.utils.obs_utils import (
     create_video_writer,
     write_video,
 )
+from omnigibson.macros import gm
+from omnigibson.robots import BaseRobot
+from omnigibson.tasks.task_factory import get_sub_tasks
+from omnigibson.utils.asset_utils import get_task_instance_path
+from omnigibson.utils.python_utils import recursively_convert_to_torch
+from rich.table import Table
+
+# sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
 
 sys.path.append(str(Path(__file__).parent.parent / 'Behavior-Dreamer'))
 from dreamer_training_utils import (
@@ -54,6 +50,7 @@ from dreamer_training_utils import (
 gm.ENABLE_FLATCACHE = True
 gm.USE_GPU_DYNAMICS = False
 gm.ENABLE_TRANSITION_RULES = True
+
 
 def look_at_quat(eye, target, up=torch.tensor([0.0, 0.0, 1.0])):
     """
@@ -208,7 +205,8 @@ class TaskEnv:
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
         if self.cfg.write_video:
-            video_path = Path('./logdir/behavior/videos/cook_bacon/move_to_fridge/').expanduser() #Path(self.cfg.log_path).expanduser() / "videos"
+            video_path = Path(
+                './logdir/behavior/videos/cook_bacon/move_to_fridge/').expanduser()  # Path(self.cfg.log_path).expanduser() / "videos"
             video_path.mkdir(parents=True, exist_ok=True)
             date_str = datetime.now().strftime("%Y%m%d")
             video_name = str(video_path) + f"/{self.task_name}_{date_str}.mkv"
@@ -357,7 +355,7 @@ class TaskEnv:
         def deg_to_rad(d):
             return {k: math.radians(v) for k, v in d.items()}
 
-        target_by_name = deg_to_rad(r1pro_T_joint_state_deg )
+        target_by_name = deg_to_rad(r1pro_T_joint_state_deg)
 
         # Build index map and start from current pose
         joint_name_to_index = {name: i for i, name in enumerate(self._robot.joints.keys())}
@@ -370,7 +368,6 @@ class TaskEnv:
         self._robot.set_joint_positions(positions=q, drive=False)
         for _ in range(25):
             og.sim.step_physics()
-
 
     def load_task_instance(self) -> None:
         """
@@ -479,7 +476,6 @@ class TaskEnv:
         #     for _ in range(2):
         #         og.sim.step_physics()
 
-
         self.frames = None
         obs, info = self._env.reset()
         self.load_task_instance()
@@ -523,6 +519,9 @@ class TaskEnv:
         )
 
         return obs
+
+    def get_robot_position(self) -> torch.tensor:
+        return self._robot.get_robot_position()
 
     def step(self, action: th.Tensor) -> tuple[dict, float, bool, bool, dict]:
         """
@@ -639,7 +638,8 @@ class TaskEnv:
                 print(f"Stage {name}, falling check error: {e}, {info_s}")
 
             try:
-                if "termination_conditions" in info_s["done"] and "max_collision" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "max_collision" in info_s["done"][
+                    "termination_conditions"]:
                     max_collision = info_s["done"]["termination_conditions"]["max_collision"]["done"]
             except Exception as e:
                 print(f"Stage {name}, max_collision check error: {e}, {info_s}")
@@ -904,6 +904,7 @@ def mask_other_actions(r, unmasked_action_type='base'):
             a[action_idx] = 1.0
     return a
 
+
 def get_hold_action(r, use_reset_pose: bool = True):
     # Start with zeros
     a = th.zeros(r.action_dim, dtype=th.float32)
@@ -963,6 +964,7 @@ def get_hold_action(r, use_reset_pose: bool = True):
             safe_fill("gripper_right", r.gripper_control_idx["right"])
 
     return a
+
 
 def overwrite_action_with_hold(action, hold_action_var, hold_action_mask):
     '''Overwrite action with hold action where mask is 0'''
