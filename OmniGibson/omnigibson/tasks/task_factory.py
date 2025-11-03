@@ -70,7 +70,7 @@ cb_move_to_fridge = partial(
     BaseNavigationTask,
     target_object_name=name_fridge,
     goal_tolerance=1.3,
-    termination_config={"max_steps": 10000},
+    termination_config={"max_steps": 10000, "max_collisions": 1},
 )
 
 cb_open_fridge = partial(
