@@ -55,7 +55,6 @@ gm.ENABLE_FLATCACHE = True
 gm.USE_GPU_DYNAMICS = False
 gm.ENABLE_TRANSITION_RULES = True
 
-
 def look_at_quat(eye, target, up=torch.tensor([0.0, 0.0, 1.0])):
     """
     Calculates the orientation quaternion to make a camera at `eye` point towards a `target`.
@@ -195,6 +194,7 @@ class TaskEnv:
             max_steps: Maximum number of simulation steps before termination.
             use_domain_randomization: Whether to apply domain randomization. Default is False.
         """
+        self.hold_action = None
         self.cfg = config.get("config")
         assert self.cfg is not None, "You must pass the main config object under the 'config' key in config."
         self.task_name = self.cfg.task.name
@@ -208,7 +208,7 @@ class TaskEnv:
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
         if self.cfg.write_video:
-            video_path = Path(self.cfg.log_path).expanduser() / "videos"
+            video_path = Path('./logdir/behavior/videos/cook_bacon/move_to_fridge/').expanduser() #Path(self.cfg.log_path).expanduser() / "videos"
             video_path.mkdir(parents=True, exist_ok=True)
             date_str = datetime.now().strftime("%Y%m%d")
             video_name = str(video_path) + f"/{self.task_name}_{date_str}.mkv"
@@ -225,6 +225,8 @@ class TaskEnv:
         self._subtask = None
         self._stage_idx = 0
         self._completed = False
+        # Snapshot of a clean, fully-initialized scene to restore on subsequent resets
+        self._base_scene_snapshot = None
 
         self._env = self.load_env()
         self.load_robot()
@@ -306,6 +308,70 @@ class TaskEnv:
         """
         self._robot = self.env.scene.object_registry("name", "robot_r1")
 
+    def set_robot_posture_from_vec(self) -> None:
+        """
+        Set robot joint positions by joint names to a predefined pose.
+
+        """
+        r1pro_init_joint_state_deg = {
+            "torso_joint1": -30.0,
+            "torso_joint2": 90.0,
+            "torso_joint3": 60.0,
+            "torso_joint4": 0.0,
+            "left_arm_joint1": 0.0,
+            "left_arm_joint2": 0.0,
+            "left_arm_joint3": 0.0,
+            "left_arm_joint4": -90.0,
+            "left_arm_joint5": 0.0,
+            "left_arm_joint6": 0.0,
+            "left_arm_joint7": 0.0,
+            "right_arm_joint1": 0.0,
+            "right_arm_joint2": 0.0,
+            "right_arm_joint3": 0.0,
+            "right_arm_joint4": -90.0,
+            "right_arm_joint5": 0.0,
+            "right_arm_joint6": 0.0,
+            "right_arm_joint7": 0.0,
+        }
+        r1pro_T_joint_state_deg = {
+            "torso_joint1": 0.0,
+            "torso_joint2": 0.0,
+            "torso_joint3": 0.0,
+            "torso_joint4": 0.0,
+            "left_arm_joint1": 0.0,
+            "left_arm_joint2": 90.0,
+            "left_arm_joint3": 0.0,
+            "left_arm_joint4": 0.0,
+            "left_arm_joint5": 0.0,
+            "left_arm_joint6": 0.0,
+            "left_arm_joint7": 0.0,
+            "right_arm_joint1": 0.0,
+            "right_arm_joint2": -90.0,
+            "right_arm_joint3": 0.0,
+            "right_arm_joint4": 0.0,
+            "right_arm_joint5": 0.0,
+            "right_arm_joint6": 0.0,
+            "right_arm_joint7": 0.0,
+        }
+
+        def deg_to_rad(d):
+            return {k: math.radians(v) for k, v in d.items()}
+
+        target_by_name = deg_to_rad(r1pro_T_joint_state_deg )
+
+        # Build index map and start from current pose
+        joint_name_to_index = {name: i for i, name in enumerate(self._robot.joints.keys())}
+        q = th.as_tensor(self._robot.get_joint_positions(), dtype=th.float32).clone()
+        for joint_name, angle in target_by_name.items():
+            idx = joint_name_to_index.get(joint_name)
+            if idx is not None and 0 <= idx < q.numel():
+                q[idx] = angle
+
+        self._robot.set_joint_positions(positions=q, drive=False)
+        for _ in range(25):
+            og.sim.step_physics()
+
+
     def load_task_instance(self) -> None:
         """
         Loads the configuration for a specific task instance.
@@ -354,6 +420,11 @@ class TaskEnv:
         self._env.scene.update_initial_file()
         self._env.scene.reset()
 
+        # This snapshot captures a fully initialized scene at a clean state, so we can
+        # reliably restore the entire scene on future resets.
+        if getattr(self, "_base_scene_snapshot", None) is None and not og.sim.is_stopped():
+            self._base_scene_snapshot = self._env.scene.save(as_dict=True)
+
     @property
     def id(self):
         return self.instance_id
@@ -396,15 +467,23 @@ class TaskEnv:
         )
         self._reset_subtask_progress()
 
-    def reset(self) -> dict[str, ...]:
+    def reset(self, restore_scene: bool = False) -> dict[str, ...]:
         """
         Reset the full environment and all subtasks.
         Returns:
              The initial observation from the environment after reset.
         """
+        # Restore entire scene from cached snapshot (if available) to reset all objects, including background
+        # if self._base_scene_snapshot is not None:
+        #     self._env.scene.restore(scene_file=self._base_scene_snapshot, update_initial_file=False)
+        #     for _ in range(2):
+        #         og.sim.step_physics()
+
+
         self.frames = None
-        self.load_task_instance()
         obs, info = self._env.reset()
+        self.load_task_instance()
+        self.set_robot_posture_from_vec()
 
         self.prev_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
         self.prev_ang_velocity_base = obs["robot_r1"]["proprio"][..., 155:158]
@@ -540,7 +619,6 @@ class TaskEnv:
             "falling": False,
             "max_collision": False,
         }
-
         sub_task_terminated = False
         if self.task_combo is not None and self.subtasks:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
@@ -555,22 +633,22 @@ class TaskEnv:
             max_collision = False
             timeout = False
             try:
-                if "falling" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "falling" in info_s["done"]["termination_conditions"]:
                     falling = info_s["done"]["termination_conditions"]["falling"]["done"]
             except Exception as e:
-                print(f"Stage {name}, falling check error: {e}")
+                print(f"Stage {name}, falling check error: {e}, {info_s}")
 
             try:
-                if "max_collision" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "max_collision" in info_s["done"]["termination_conditions"]:
                     max_collision = info_s["done"]["termination_conditions"]["max_collision"]["done"]
             except Exception as e:
-                print(f"Stage {name}, max_collision check error: {e}")
+                print(f"Stage {name}, max_collision check error: {e}, {info_s}")
 
             try:
-                if "timeout" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "timeout" in info_s["done"]["termination_conditions"]:
                     timeout = info_s["done"]["termination_conditions"]["timeout"]["done"]
             except Exception as e:
-                print(f"Stage {name}, timeout check error: {e}")
+                print(f"Stage {name}, timeout check error: {e}, {info_s}")
 
             sub_task_terminated = any([falling, max_collision, timeout])
 
@@ -609,7 +687,7 @@ class TaskEnv:
                     flush=True,
                 )
             else:
-                print(f"Subtask {self.active_subtask} terminated.\n{info_s['done']}", flush=True)
+                print(f"Subtask {self.active_subtask} terminated.\n{info_out['subtask']}", flush=True)
 
         self._write_video(obs, done=terminated_env or truncated_env)
 
@@ -690,7 +768,8 @@ class TaskEnv:
                 cam_pose = T.mat2pose(th.tensor(np.linalg.inv(np.reshape(direct_cam_pose, [4, 4]).T), dtype=th.float32))
                 cam_rel_poses.append(th.cat(T.relative_pose_transform(*cam_pose, *base_pose)))
         obs["robot_r1::cam_rel_poses"] = th.cat(cam_rel_poses, axis=-1)
-        obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
+        if self.cfg.robot.controllers.get("use_preprocessing", True):
+            obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
         for k in obs:
             if "rgb" in k:
                 obs[k] = self._preprocess_rgb(obs[k])
@@ -814,6 +893,87 @@ class TaskEnv:
 
 
 # ----- Utilities to drive the example code-----
+
+def mask_other_actions(r, unmasked_action_type='base'):
+    a = th.zeros(r.action_dim, dtype=th.float32)
+
+    idx = r.controller_action_idx
+
+    for slice_key, action_idx in idx.items():
+        if unmasked_action_type in slice_key:
+            a[action_idx] = 1.0
+    return a
+
+def get_hold_action(r, use_reset_pose: bool = True):
+    # Start with zeros
+    a = th.zeros(r.action_dim, dtype=th.float32)
+
+    idx = r.controller_action_idx
+    # Source joint positions to hold: prefer robot's reset (e.g., tucked) pose to avoid protruding arms
+    # Fall back to current qpos if reset_joint_pos is not available
+    # if use_reset_pose and getattr(r, "reset_joint_pos", None) is not None:
+    #     qpos_all = th.as_tensor(r.reset_joint_pos, dtype=th.float32)
+    # else:
+    qpos_all = th.as_tensor(r.get_joint_positions(), dtype=th.float32)
+
+    def safe_fill(slice_key, joint_idx):
+        if slice_key not in idx or joint_idx is None:
+            return
+        act_idx = idx[slice_key]
+        # Convert to index tensor if needed
+        jidx = th.as_tensor(joint_idx, dtype=th.long)
+        # Current joint positions for that group
+        q = qpos_all[jidx]  # shape [nj]
+        # Action slice length
+        na = len(act_idx)
+        nj = int(q.numel())
+        if na == nj:
+            a[act_idx] = q
+        elif na == 1 and nj > 1:
+            a[act_idx] = q.mean()
+        elif na > 1 and nj == 1:
+            a[act_idx] = q.repeat(na)
+        else:
+            # Fallback: size mismatch; use mean to avoid crashes
+            a[act_idx] = q.mean()
+
+    # Base: velocity controller  keep zero to hold still
+    # Trunk / torso (keep at reset pose if available)
+    if hasattr(r, "trunk_control_idx"):
+        safe_fill("trunk", r.trunk_control_idx)
+    # Some robots expose torso under a different key in controller_action_idx
+    if "torso" in idx and hasattr(r, "trunk_control_idx"):
+        safe_fill("torso", r.trunk_control_idx)
+
+    # Arms (explicitly drive to tucked / reset pose to prevent wall collisions)
+    if hasattr(r, "arm_control_idx"):
+        if "left" in r.arm_control_idx:
+            safe_fill("arm_left", r.arm_control_idx["left"])
+        if "right" in r.arm_control_idx:
+            safe_fill("arm_right", r.arm_control_idx["right"])
+        if "combined" in r.arm_control_idx:
+            # If your controller exposes a single combined arm slice
+            safe_fill("arm", r.arm_control_idx["combined"])
+
+    # Grippers (hold at reset pose, typically closed/neutral)
+    if hasattr(r, "gripper_control_idx"):
+        if "left" in r.gripper_control_idx:
+            safe_fill("gripper_left", r.gripper_control_idx["left"])
+        if "right" in r.gripper_control_idx:
+            safe_fill("gripper_right", r.gripper_control_idx["right"])
+
+    return a
+
+def overwrite_action_with_hold(action, hold_action_var, hold_action_mask):
+    '''Overwrite action with hold action where mask is 0'''
+    to_device, to_dtype = action.device, action.dtype
+    hold_action_var = hold_action_var.to(device=to_device, dtype=to_dtype)
+    hold_action_mask = hold_action_mask.to(device=to_device, dtype=to_dtype)
+    return (
+        action * hold_action_mask + hold_action_var * (1 - hold_action_mask),
+        hold_action_var,
+        hold_action_mask,
+    )
 
 
 def build_transform(theta, pos_xy, z=0.0) -> np.ndarray:
@@ -971,11 +1131,19 @@ if __name__ == "__main__":
         step_rewards.update({stage_states[0]['name']: []})
         step_success.update({stage_states[0]['name']: []})
 
+        hold_action_var = get_hold_action(env._robot)
+        hold_action_mask = mask_other_actions(env._robot, unmasked_action_type="base")
+
         with Live(make_table(stage_states), console=console, refresh_per_second=4) as live:
             for _, row in df.iterrows():
-                base_pos = obs["robot_r1"]["proprio"][140:142]
-                yaw2d = obs["robot_r1"]["proprio"][149]
+                base_pos = obs["robot_r1::proprio"][140:142]
+                yaw2d = obs["robot_r1::proprio"][149]
                 action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
+
+                # Hold all joints except base
+                # action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
+                #     action, hold_action_var, hold_action_mask
+                # )
 
                 obs, reward_env, terminated_env, truncated_env, info = env.step(action)
                 sub_task_info = info["subtask"]
@@ -991,8 +1159,8 @@ if __name__ == "__main__":
                     stage_states[idx]["status"] = "failed"
 
                 stage_states[idx]["reward"] = sub_task_info["reward"]
-                step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
-                step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
+                # step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
+                # step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
 
                 # Move to the next stage
                 if sub_task_info["done"] and has_next_stage:
