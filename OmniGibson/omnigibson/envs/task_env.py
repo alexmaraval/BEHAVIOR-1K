@@ -688,7 +688,8 @@ class TaskEnv:
                 cam_pose = T.mat2pose(th.tensor(np.linalg.inv(np.reshape(direct_cam_pose, [4, 4]).T), dtype=th.float32))
                 cam_rel_poses.append(th.cat(T.relative_pose_transform(*cam_pose, *base_pose)))
         obs["robot_r1::cam_rel_poses"] = th.cat(cam_rel_poses, axis=-1)
-        obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
+        if self.cfg.robot.controllers.get("use_preprocessing", True):
+            obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
         for k in obs:
             if "rgb" in k:
                 obs[k] = self._preprocess_rgb(obs[k])
