@@ -403,10 +403,11 @@ class TaskEnv:
         Returns:
              The initial observation from the environment after reset.
         """
+        
         self._env.robots[0].reset()
-        obs, info = self._env.reset()
+        obs, _ = self._env.reset()
         self.load_task_instance()
-
+        
         self.frames = None
 
         self.prev_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
@@ -643,16 +644,16 @@ class TaskEnv:
             return proprio
         sliced_proprio = torch.cat(
             [
-                proprio[..., 152:158],  # lin + ang vel
-                proprio[..., 158:165],  # left arm q
-                proprio[..., 179:186],  # left arm dq
-                proprio[..., 186:193],  # left eef pos + quat
-                proprio[..., 193:197],  # left gripper pos + vel
-                proprio[..., 197:204],  # right arm q
-                proprio[..., 218:225],  # right arm dq
-                proprio[..., 225:232],  # right eef pos + quat
-                proprio[..., 232:236],  # right gripper pos + vel
-                proprio[..., 236:244],  # torso q + dq
+                proprio[..., 152:158],  # lin + ang vel 0:6
+                proprio[..., 158:165],  # left arm q 6:13
+                proprio[..., 179:186],  # left arm dq 13:20
+                proprio[..., 186:193],  # left eef pos + quat 20:27
+                proprio[..., 193:197],  # left gripper pos + vel 27:31
+                proprio[..., 197:204],  # right arm q 31:38
+                proprio[..., 218:225],  # right arm dq 38:45
+                proprio[..., 225:232],  # right eef pos + quat 45:52
+                proprio[..., 232:236],  # right gripper pos + vel 52:56
+                proprio[..., 236:244],  # torso q + dq 56:64
             ],
             dim=-1,
         )
@@ -1034,9 +1035,9 @@ class TaskIKEnv(TaskEnv):
         return obs, reward_env, terminated_env, truncated_env, info_out
 
     def reset(self):
-        self.load_task_instance()
         self._env.robots[0].reset()
         obs, info = self._env.reset()
+        self.load_task_instance()
 
         self.current_upper_joint = torch.cat([obs["robot_r1"]["proprio"][..., 236:240],
                                           obs["robot_r1"]["proprio"][..., 158:165],

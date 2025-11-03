@@ -30,7 +30,8 @@ move_to_radio = partial(
     BaseNavigationTask,
     target_object_name=name_radio,
     goal_tolerance=1,
-    termination_config={"max_steps": 5000},
+    termination_config={"max_steps": 5000, "max_collisions": 1},
+    reward_config={"r_collision": 1}
 )
 
 grasp_radio = partial(
