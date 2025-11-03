@@ -210,7 +210,6 @@ class TaskEnv:
         if self.cfg.write_video:
             self.video_path = Path(self.cfg.log_path).expanduser() / "videos"
             self.video_path.mkdir(parents=True, exist_ok=True)
-            self._video_writer_factory = lambda fpath: create_video_writer(fpath=fpath, resolution=(448, 1120))
             self.frames = []
         else:
             self.frames = None
@@ -733,13 +732,14 @@ class TaskEnv:
             if done:
                 date_str = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
                 video_name = str(self.video_path) + f"/{self.task_name}_{date_str}.mkv"
-                video_writer = self._video_writer_factory(video_name)
+                video_writer = create_video_writer(fpath=video_name, resolution=(448, 1120))
                 write_video(
                     self.frames,
                     video_writer=video_writer,
                     batch_size=1,
                     mode="rgb",
                 )
+                del video_writer
 
     @staticmethod
     def collect_tokens_and_entries(data: dict) -> tuple[dict[str, dict], dict]:
