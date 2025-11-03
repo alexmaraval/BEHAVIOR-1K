@@ -191,7 +191,6 @@ class TaskEnv:
             max_steps: Maximum number of simulation steps before termination.
             use_domain_randomization: Whether to apply domain randomization. Default is False.
         """
-        self.hold_action = None
         self.cfg = config.get("config")
         assert self.cfg is not None, "You must pass the main config object under the 'config' key in config."
         self.task_name = self.cfg.task.name
@@ -205,12 +204,8 @@ class TaskEnv:
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
         if self.cfg.write_video:
-            video_path = Path(
-                './logdir/behavior/videos/cook_bacon/move_to_fridge/').expanduser()  # Path(self.cfg.log_path).expanduser() / "videos"
-            video_path.mkdir(parents=True, exist_ok=True)
-            date_str = datetime.now().strftime("%Y%m%d")
-            video_name = str(video_path) + f"/{self.task_name}_{date_str}.mkv"
-            self._video_writer = create_video_writer(fpath=video_name, resolution=(448, 1120))
+            self.video_path = Path(self.cfg.log_path).expanduser() / "videos"
+            self.video_path.mkdir(parents=True, exist_ok=True)
             self.frames = []
         else:
             self.frames = None
@@ -223,8 +218,6 @@ class TaskEnv:
         self._subtask = None
         self._stage_idx = 0
         self._completed = False
-        # Snapshot of a clean, fully-initialized scene to restore on subsequent resets
-        self._base_scene_snapshot = None
 
         self._env = self.load_env()
         self.load_robot()
@@ -306,69 +299,6 @@ class TaskEnv:
         """
         self._robot = self.env.scene.object_registry("name", "robot_r1")
 
-    def set_robot_posture_from_vec(self) -> None:
-        """
-        Set robot joint positions by joint names to a predefined pose.
-
-        """
-        r1pro_init_joint_state_deg = {
-            "torso_joint1": -30.0,
-            "torso_joint2": 90.0,
-            "torso_joint3": 60.0,
-            "torso_joint4": 0.0,
-            "left_arm_joint1": 0.0,
-            "left_arm_joint2": 0.0,
-            "left_arm_joint3": 0.0,
-            "left_arm_joint4": -90.0,
-            "left_arm_joint5": 0.0,
-            "left_arm_joint6": 0.0,
-            "left_arm_joint7": 0.0,
-            "right_arm_joint1": 0.0,
-            "right_arm_joint2": 0.0,
-            "right_arm_joint3": 0.0,
-            "right_arm_joint4": -90.0,
-            "right_arm_joint5": 0.0,
-            "right_arm_joint6": 0.0,
-            "right_arm_joint7": 0.0,
-        }
-        r1pro_T_joint_state_deg = {
-            "torso_joint1": 0.0,
-            "torso_joint2": 0.0,
-            "torso_joint3": 0.0,
-            "torso_joint4": 0.0,
-            "left_arm_joint1": 0.0,
-            "left_arm_joint2": 90.0,
-            "left_arm_joint3": 0.0,
-            "left_arm_joint4": 0.0,
-            "left_arm_joint5": 0.0,
-            "left_arm_joint6": 0.0,
-            "left_arm_joint7": 0.0,
-            "right_arm_joint1": 0.0,
-            "right_arm_joint2": -90.0,
-            "right_arm_joint3": 0.0,
-            "right_arm_joint4": 0.0,
-            "right_arm_joint5": 0.0,
-            "right_arm_joint6": 0.0,
-            "right_arm_joint7": 0.0,
-        }
-
-        def deg_to_rad(d):
-            return {k: math.radians(v) for k, v in d.items()}
-
-        target_by_name = deg_to_rad(r1pro_T_joint_state_deg)
-
-        # Build index map and start from current pose
-        joint_name_to_index = {name: i for i, name in enumerate(self._robot.joints.keys())}
-        q = th.as_tensor(self._robot.get_joint_positions(), dtype=th.float32).clone()
-        for joint_name, angle in target_by_name.items():
-            idx = joint_name_to_index.get(joint_name)
-            if idx is not None and 0 <= idx < q.numel():
-                q[idx] = angle
-
-        self._robot.set_joint_positions(positions=q, drive=False)
-        for _ in range(25):
-            og.sim.step_physics()
-
     def load_task_instance(self) -> None:
         """
         Loads the configuration for a specific task instance.
@@ -417,11 +347,6 @@ class TaskEnv:
         self._env.scene.update_initial_file()
         self._env.scene.reset()
 
-        # This snapshot captures a fully initialized scene at a clean state, so we can
-        # reliably restore the entire scene on future resets.
-        if getattr(self, "_base_scene_snapshot", None) is None and not og.sim.is_stopped():
-            self._base_scene_snapshot = self._env.scene.save(as_dict=True)
-
     @property
     def id(self):
         return self.instance_id
@@ -464,22 +389,17 @@ class TaskEnv:
         )
         self._reset_subtask_progress()
 
-    def reset(self, restore_scene: bool = False) -> dict[str, ...]:
+    def reset(self) -> dict[str, ...]:
         """
         Reset the full environment and all subtasks.
         Returns:
              The initial observation from the environment after reset.
         """
-        # Restore entire scene from cached snapshot (if available) to reset all objects, including background
-        # if self._base_scene_snapshot is not None:
-        #     self._env.scene.restore(scene_file=self._base_scene_snapshot, update_initial_file=False)
-        #     for _ in range(2):
-        #         og.sim.step_physics()
-
-        self.frames = None
+        self._env.robots[0].reset()
         obs, info = self._env.reset()
         self.load_task_instance()
-        self.set_robot_posture_from_vec()
+
+        self.frames = None
 
         self.prev_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
         self.prev_ang_velocity_base = obs["robot_r1"]["proprio"][..., 155:158]
@@ -618,6 +538,7 @@ class TaskEnv:
             "falling": False,
             "max_collision": False,
         }
+
         sub_task_terminated = False
         if self.task_combo is not None and self.subtasks:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
@@ -699,7 +620,6 @@ class TaskEnv:
         Returns:
             None
         """
-        self._video_writer = None
         self._env.close()
         og.shutdown()
 
@@ -768,8 +688,7 @@ class TaskEnv:
                 cam_pose = T.mat2pose(th.tensor(np.linalg.inv(np.reshape(direct_cam_pose, [4, 4]).T), dtype=th.float32))
                 cam_rel_poses.append(th.cat(T.relative_pose_transform(*cam_pose, *base_pose)))
         obs["robot_r1::cam_rel_poses"] = th.cat(cam_rel_poses, axis=-1)
-        if self.cfg.robot.controllers.get("use_preprocessing", True):
-            obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
+        obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
         for k in obs:
             if "rgb" in k:
                 obs[k] = self._preprocess_rgb(obs[k])
@@ -811,12 +730,16 @@ class TaskEnv:
                 self.frames = frame
 
             if done:
+                date_str = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+                video_name = str(self.video_path) + f"/{self.task_name}_{date_str}.mkv"
+                video_writer = create_video_writer(fpath=video_name, resolution=(448, 1120))
                 write_video(
                     self.frames,
-                    video_writer=self._video_writer,
+                    video_writer=video_writer,
                     batch_size=1,
                     mode="rgb",
                 )
+                del video_writer
 
     @staticmethod
     def collect_tokens_and_entries(data: dict) -> tuple[dict[str, dict], dict]:
@@ -1133,19 +1056,11 @@ if __name__ == "__main__":
         step_rewards.update({stage_states[0]['name']: []})
         step_success.update({stage_states[0]['name']: []})
 
-        hold_action_var = get_hold_action(env._robot)
-        hold_action_mask = mask_other_actions(env._robot, unmasked_action_type="base")
-
         with Live(make_table(stage_states), console=console, refresh_per_second=4) as live:
             for _, row in df.iterrows():
                 base_pos = obs["robot_r1::proprio"][140:142]
                 yaw2d = obs["robot_r1::proprio"][149]
                 action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
-
-                # Hold all joints except base
-                # action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
-                #     action, hold_action_var, hold_action_mask
-                # )
 
                 obs, reward_env, terminated_env, truncated_env, info = env.step(action)
                 sub_task_info = info["subtask"]
@@ -1161,8 +1076,8 @@ if __name__ == "__main__":
                     stage_states[idx]["status"] = "failed"
 
                 stage_states[idx]["reward"] = sub_task_info["reward"]
-                # step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
-                # step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
+                step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
+                step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
 
                 # Move to the next stage
                 if sub_task_info["done"] and has_next_stage:
