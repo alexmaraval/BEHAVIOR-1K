@@ -4,7 +4,7 @@ from omnigibson.object_states import AttachedTo
 from omnigibson.object_states.robot_related_states import IsGrasping
 from omnigibson.reward_functions.reward_function_base import BaseRewardFunction
 from omnigibson.tasks.custom_task_base import BaseTask
-from omnigibson.termination_conditions.falling import Falling
+from omnigibson.termination_conditions.falling import Falling, ObjectFalling
 from omnigibson.termination_conditions.termination_condition_base import SuccessCondition
 from omnigibson.termination_conditions.timeout import Timeout
 from omnigibson.utils.motion_planning_utils import detect_robot_collision_in_sim
@@ -149,6 +149,7 @@ class RobustGraspTask(BaseTask):
             "timeout": Timeout(max_steps=self._termination_config["max_steps"]),
             "graspgoal": _GraspSuccess(obj_name=self._obj_name),
             "falling": Falling(robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]),
+            "object_falling": ObjectFalling(obj_name=self._obj_name, fall_height=self._termination_config["fall_height"]),
         }
 
     def _create_reward_functions(self):
@@ -174,11 +175,11 @@ class RobustGraspTask(BaseTask):
     @classproperty
     def default_termination_config(cls):
         return {
-            "max_collisions": 500,
+            "max_collisions": 1,
             "max_steps": 500,
             "fall_height": 0.03,
         }
 
     @classproperty
     def default_reward_config(cls):
-        return {"dist_coeff": 0.001, "r_grasp": 1.0, "collision_penalty": 1.0}
+        return {"dist_coeff": 0.001, "r_grasp": 10.0, "collision_penalty": 10.0}
