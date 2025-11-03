@@ -7,6 +7,7 @@ from pathlib import Path
 
 import cv2
 import math
+import time
 import numpy as np
 import torch
 import torch as th
@@ -945,8 +946,7 @@ class TaskIKEnv(TaskEnv):
             self.prev_angle_right_gripper = self.curr_angle_right_gripper
 
         obs = self._preprocess_obs(obs)
-        self._write_video(obs)
-
+        
         # Create sub task info
         subtask_info = {
             "name": None,
@@ -1031,6 +1031,8 @@ class TaskIKEnv(TaskEnv):
                 )
             else:
                 print(f"Subtask {self.active_subtask} terminated.\n{info_s['done']}", flush=True)
+        
+        self._write_video(obs, done=terminated_env or truncated_env)
 
         return obs, reward_env, terminated_env, truncated_env, info_out
 

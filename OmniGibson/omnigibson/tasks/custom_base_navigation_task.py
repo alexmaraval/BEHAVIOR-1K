@@ -268,7 +268,7 @@ class BaseNavigationTask(BaseTask):
     @classproperty
     def default_termination_config(cls):
         return {
-            "max_collisions": 500,
+            "max_collisions": 1,
             "max_steps": 500,
             "fall_height": 0.03,
         }
@@ -277,6 +277,6 @@ class BaseNavigationTask(BaseTask):
     def default_reward_config(cls):
         return {
             "r_potential": 1.0,
-            "r_collision": 0.1,
+            "r_collision": 1.0,
             "r_pointgoal": 10.0,
         }
