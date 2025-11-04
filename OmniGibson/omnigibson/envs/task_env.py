@@ -548,7 +548,6 @@ class TaskEnv:
             name = None
             if self._stage_idx < len(self.subtasks):
                 name = self._task_stages[self._stage_idx]["name"]
-
             falling = False
             max_collision = False
             timeout = False
@@ -828,6 +827,37 @@ def mask_other_actions(r, unmasked_action_type='base'):
             a[action_idx] = 1.0
     return a
 
+def build_upper_body_hold_action(r, use_reset_pose=True):
+    a = torch.zeros(r.action_dim, dtype=torch.float32)
+    idx = r.controller_action_idx
+    # Source joint positions to hold
+    q_all = torch.as_tensor(
+        r.reset_joint_pos if (use_reset_pose and getattr(r, "reset_joint_pos", None) is not None)
+        else r.get_joint_positions(),
+        dtype=torch.float32
+    )
+
+    # Trunk
+    if "trunk" in idx and hasattr(r, "trunk_control_idx"):
+        ctrl = r.controllers["trunk"]
+        cmd = q_all[r.trunk_control_idx]  # joint positions
+        a[idx["trunk"]] = ctrl._reverse_preprocess_command(cmd)  # normalized action
+
+    # Arms
+    for side in ("left", "right"):
+        key = f"arm_{side}"
+        if key in idx and hasattr(r, "arm_control_idx") and side in r.arm_control_idx:
+            ctrl = r.controllers[key]
+            cmd = q_all[r.arm_control_idx[side]]
+            a[idx[key]] = ctrl._reverse_preprocess_command(cmd)
+
+    # for side in ("left", "right"):
+    #     key = f"gripper_{side}"
+    #     if key in idx:
+    #         a[idx[key]] = 0.0  # neutral in 'smooth' mode; adjust if needed
+
+    return a
+
 
 def get_hold_action(r, use_reset_pose: bool = True):
     # Start with zeros
@@ -1057,11 +1087,18 @@ if __name__ == "__main__":
         step_rewards.update({stage_states[0]['name']: []})
         step_success.update({stage_states[0]['name']: []})
 
+        hold_action_var = build_upper_body_hold_action(env._robot)
+        hold_action_mask = mask_other_actions(env._robot, unmasked_action_type="base")
+
         with Live(make_table(stage_states), console=console, refresh_per_second=4) as live:
             for _, row in df.iterrows():
                 base_pos = obs["robot_r1::proprio"][140:142]
                 yaw2d = obs["robot_r1::proprio"][149]
                 action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
+
+                action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
+                    action, hold_action_var, hold_action_mask
+                )
 
                 obs, reward_env, terminated_env, truncated_env, info = env.step(action)
                 sub_task_info = info["subtask"]
@@ -1077,8 +1114,8 @@ if __name__ == "__main__":
                     stage_states[idx]["status"] = "failed"
 
                 stage_states[idx]["reward"] = sub_task_info["reward"]
-                step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
-                step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
+                # step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
+                # step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
 
                 # Move to the next stage
                 if sub_task_info["done"] and has_next_stage:

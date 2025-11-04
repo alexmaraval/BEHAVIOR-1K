@@ -5,7 +5,7 @@ from omnigibson.reward_functions.point_goal_reward import PointGoalReward
 from omnigibson.reward_functions.potential_reward import PotentialReward
 from omnigibson.scenes.traversable_scene import TraversableScene
 from omnigibson.tasks.custom_task_base import BaseTask
-from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _CollisionRewardFiltered, _get_named, _front_target
+from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _CollisionRewardFiltered, _get_named, _front_target, get_orientation_error
 from omnigibson.termination_conditions.falling import Falling
 from omnigibson.termination_conditions.point_goal import PointGoal
 from omnigibson.termination_conditions.timeout import Timeout
@@ -258,6 +258,11 @@ class BaseNavigationTask(BaseTask):
         self._path_length += T.l2_distance(self._current_robot_pos[:2], new_robot_pos[:2])
         self._current_robot_pos = new_robot_pos
 
+        # Orientation error
+        if done and info["done"]["success"]:
+            heading_error = get_orientation_error(robot=env.robots[self._robot_idn], goal_pos=self.get_goal_pos())
+            orientation_error = -self._reward_config["r_orientation"] * heading_error
+            info['reward']["reward_breakdown"]["orientation_error"] = float(orientation_error.item())
         return reward, done, info
 
     @classproperty
@@ -268,7 +273,7 @@ class BaseNavigationTask(BaseTask):
     @classproperty
     def default_termination_config(cls):
         return {
-            "max_collisions": 500,
+            "max_collisions": 1,
             "max_steps": 500,
             "fall_height": 0.03,
         }
@@ -279,4 +284,6 @@ class BaseNavigationTask(BaseTask):
             "r_potential": 1.0,
             "r_collision": 0.1,
             "r_pointgoal": 10.0,
+            "r_orientation": 1,
         }
+
