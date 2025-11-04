@@ -5,7 +5,7 @@ from omnigibson.reward_functions.point_goal_reward import PointGoalReward
 from omnigibson.reward_functions.potential_reward import PotentialReward
 from omnigibson.scenes.traversable_scene import TraversableScene
 from omnigibson.tasks.custom_task_base import BaseTask
-from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _CollisionRewardFiltered, _get_named, _front_target
+from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _CollisionRewardFiltered, _get_named, _front_target, get_orientation_error
 from omnigibson.termination_conditions.falling import Falling
 from omnigibson.termination_conditions.point_goal import PointGoal
 from omnigibson.termination_conditions.timeout import Timeout
@@ -282,7 +282,7 @@ class BaseNavigationTask(BaseTask):
     def default_reward_config(cls):
         return {
             "r_potential": 1.0,
-            "r_collision": 1.0,
-            "r_pointgoal": 20.0,
+            "r_collision": 10.0,
+            "r_pointgoal": 50.0,
             "r_orientation": 1,
         }
