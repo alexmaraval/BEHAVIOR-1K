@@ -52,6 +52,9 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         self._success = None
         self._info = None
 
+        # Skip collisions with objects
+        self.skip_collisions_objs = []
+
         # Run super init
         super().__init__()
 
