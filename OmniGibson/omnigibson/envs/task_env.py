@@ -9,29 +9,18 @@ import cv2
 import math
 import time
 import numpy as np
-import torch
-import torch as th
-from hydra.utils import instantiate
-
-# sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
-
 import omnigibson as og
 import omnigibson.utils.transform_utils as T
-from omnigibson.macros import gm
-from omnigibson.envs.env_wrapper import EnvironmentWrapper
-
+import torch
+import torch as th
 from gello.robots.sim_robot.og_teleop_utils import (
     augment_rooms,
     load_available_tasks,
     generate_robot_config,
     get_task_relevant_room_types,
 )
-from omnigibson.utils.asset_utils import get_task_instance_path
-from omnigibson.utils.python_utils import recursively_convert_to_torch
-from omnigibson.tasks.task_factory import get_sub_tasks
-from omnigibson.robots import BaseRobot
-from rich.table import Table
-
+from hydra.utils import instantiate
+from omnigibson.envs.env_wrapper import EnvironmentWrapper
 from omnigibson.learning.utils.eval_utils import (
     ROBOT_CAMERA_NAMES,
     PROPRIOCEPTION_INDICES,
@@ -39,11 +28,18 @@ from omnigibson.learning.utils.eval_utils import (
     flatten_obs_dict,
     TASK_NAMES_TO_INDICES,
 )
-
 from omnigibson.learning.utils.obs_utils import (
     create_video_writer,
     write_video,
 )
+from omnigibson.macros import gm
+from omnigibson.robots import BaseRobot
+from omnigibson.tasks.task_factory import get_sub_tasks
+from omnigibson.utils.asset_utils import get_task_instance_path
+from omnigibson.utils.python_utils import recursively_convert_to_torch
+from rich.table import Table
+
+# sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
 
 sys.path.append(str(Path(__file__).parent.parent / 'Behavior-Dreamer'))
 sys.path.append(str(Path(__file__).parent.parent / 'Behavior-Dreamer/behavior1k'))
@@ -214,7 +210,6 @@ class TaskEnv:
         if self.cfg.write_video:
             self.video_path = Path(self.cfg.log_path).expanduser() / "videos"
             self.video_path.mkdir(parents=True, exist_ok=True)
-            self._video_writer_factory = lambda fpath: create_video_writer(fpath=fpath, resolution=(448, 1120))
             self.frames = []
         else:
             self.frames = None
@@ -450,6 +445,9 @@ class TaskEnv:
 
         return obs
 
+    def get_robot_position(self) -> torch.tensor:
+        return self._robot.get_robot_position()
+
     def step(self, action: th.Tensor) -> tuple[dict, float, bool, bool, dict]:
         """
         Execute one environment step and update subtask progress.
@@ -560,22 +558,23 @@ class TaskEnv:
             max_collision = False
             timeout = False
             try:
-                if "falling" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "falling" in info_s["done"]["termination_conditions"]:
                     falling = info_s["done"]["termination_conditions"]["falling"]["done"]
             except Exception as e:
-                print(f"Stage {name}, falling check error: {e}")
+                print(f"Stage {name}, falling check error: {e}, {info_s}")
 
             try:
-                if "max_collision" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "max_collision" in info_s["done"][
+                    "termination_conditions"]:
                     max_collision = info_s["done"]["termination_conditions"]["max_collision"]["done"]
             except Exception as e:
-                print(f"Stage {name}, max_collision check error: {e}")
+                print(f"Stage {name}, max_collision check error: {e}, {info_s}")
 
             try:
-                if "timeout" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "timeout" in info_s["done"]["termination_conditions"]:
                     timeout = info_s["done"]["termination_conditions"]["timeout"]["done"]
             except Exception as e:
-                print(f"Stage {name}, timeout check error: {e}")
+                print(f"Stage {name}, timeout check error: {e}, {info_s}")
 
             sub_task_terminated = any([falling, max_collision, timeout])
 
@@ -604,21 +603,20 @@ class TaskEnv:
         info_out = info_env
         info_out["subtask"] = subtask_info
         info_out["all_subtasks_complete"] = self._completed
-        terminated_env = terminated_env or sub_task_terminated
+        terminated_ep = terminated_env or sub_task_terminated
 
-        if terminated_env:
-            if info_out["subtask"]["success"]:
-                print(
-                    f"Subtask {self._stage_idx} done! {len(self.subtasks) - self._stage_idx - 1} more to go.\n"
-                    f"Collected subtask {self._stage_idx} reward: {info_out['subtask']['reward']}",
-                    flush=True,
-                )
-            else:
-                print(f"Subtask {self.active_subtask} terminated.\n{info_s['done']}", flush=True)
+        if info_out["subtask"]["success"]:
+            print(
+                f"Subtask {self._stage_idx} done! {len(self.subtasks) - self._stage_idx - 1} more to go.\n"
+                f"Collected subtask {self._stage_idx} reward: {info_out['subtask']['reward']}",
+                flush=True,
+            )
+        if terminated_ep:
+            print(f"Subtask {self.active_subtask} terminated.\n{info_out['subtask']}", flush=True)
+            if terminated_env:
+                self._write_video(obs, done=True)
 
-        self._write_video(obs, done=terminated_env or truncated_env)
-
-        return obs, reward_env, terminated_env, truncated_env, info_out
+        return obs, reward_env, terminated_ep, truncated_env, info_out
 
     def close(self) -> None:
         """
@@ -736,15 +734,24 @@ class TaskEnv:
                 self.frames = frame
 
             if done:
+                if self.frames is None or len(self.frames) == 0:
+                    print("Warning: done=True but no frames collected — skipping video save")
+                    return
                 date_str = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
                 video_name = str(self.video_path) + f"/{self.task_name}_{date_str}.mkv"
-                video_writer = self._video_writer_factory(video_name)
-                write_video(
-                    self.frames,
-                    video_writer=video_writer,
-                    batch_size=1,
-                    mode="rgb",
-                )
+                container, stream = create_video_writer(fpath=video_name, resolution=(448, 1120))
+                try:
+                    write_video(
+                        self.frames,
+                        video_writer=(container, stream),
+                        batch_size=1,
+                        mode="rgb",
+                    )
+                    # flush any remaining packets
+                    for packet in stream.encode(None):
+                        container.mux(packet)
+                finally:
+                    container.close()
 
     @staticmethod
     def collect_tokens_and_entries(data: dict) -> tuple[dict[str, dict], dict]:
@@ -1086,6 +1093,120 @@ class TaskIKEnv(TaskEnv):
         return obs
 # ----- Utilities to drive the example code-----
 
+def mask_other_actions(r, unmasked_action_type='base'):
+    a = th.zeros(r.action_dim, dtype=th.float32)
+
+    idx = r.controller_action_idx
+
+    for slice_key, action_idx in idx.items():
+        if unmasked_action_type in slice_key:
+            a[action_idx] = 1.0
+    return a
+
+def build_upper_body_hold_action(r, use_reset_pose=True):
+    a = torch.zeros(r.action_dim, dtype=torch.float32)
+    idx = r.controller_action_idx
+    # Source joint positions to hold
+    q_all = torch.as_tensor(
+        r.reset_joint_pos if (use_reset_pose and getattr(r, "reset_joint_pos", None) is not None)
+        else r.get_joint_positions(),
+        dtype=torch.float32
+    )
+
+    # Trunk
+    if "trunk" in idx and hasattr(r, "trunk_control_idx"):
+        ctrl = r.controllers["trunk"]
+        cmd = q_all[r.trunk_control_idx]  # joint positions
+        a[idx["trunk"]] = ctrl._reverse_preprocess_command(cmd)  # normalized action
+
+    # Arms
+    for side in ("left", "right"):
+        key = f"arm_{side}"
+        if key in idx and hasattr(r, "arm_control_idx") and side in r.arm_control_idx:
+            ctrl = r.controllers[key]
+            cmd = q_all[r.arm_control_idx[side]]
+            a[idx[key]] = ctrl._reverse_preprocess_command(cmd)
+
+    # for side in ("left", "right"):
+    #     key = f"gripper_{side}"
+    #     if key in idx:
+    #         a[idx[key]] = 0.0  # neutral in 'smooth' mode; adjust if needed
+
+    return a
+
+
+def get_hold_action(r, use_reset_pose: bool = True):
+    # Start with zeros
+    a = th.zeros(r.action_dim, dtype=th.float32)
+
+    idx = r.controller_action_idx
+    # Source joint positions to hold: prefer robot's reset (e.g., tucked) pose to avoid protruding arms
+    # Fall back to current qpos if reset_joint_pos is not available
+    # if use_reset_pose and getattr(r, "reset_joint_pos", None) is not None:
+    #     qpos_all = th.as_tensor(r.reset_joint_pos, dtype=th.float32)
+    # else:
+    qpos_all = th.as_tensor(r.get_joint_positions(), dtype=th.float32)
+
+    def safe_fill(slice_key, joint_idx):
+        if slice_key not in idx or joint_idx is None:
+            return
+        act_idx = idx[slice_key]
+        # Convert to index tensor if needed
+        jidx = th.as_tensor(joint_idx, dtype=th.long)
+        # Current joint positions for that group
+        q = qpos_all[jidx]  # shape [nj]
+        # Action slice length
+        na = len(act_idx)
+        nj = int(q.numel())
+        if na == nj:
+            a[act_idx] = q
+        elif na == 1 and nj > 1:
+            a[act_idx] = q.mean()
+        elif na > 1 and nj == 1:
+            a[act_idx] = q.repeat(na)
+        else:
+            # Fallback: size mismatch; use mean to avoid crashes
+            a[act_idx] = q.mean()
+
+    # Base: velocity controller  keep zero to hold still
+    # Trunk / torso (keep at reset pose if available)
+    if hasattr(r, "trunk_control_idx"):
+        safe_fill("trunk", r.trunk_control_idx)
+    # Some robots expose torso under a different key in controller_action_idx
+    if "torso" in idx and hasattr(r, "trunk_control_idx"):
+        safe_fill("torso", r.trunk_control_idx)
+
+    # Arms (explicitly drive to tucked / reset pose to prevent wall collisions)
+    if hasattr(r, "arm_control_idx"):
+        if "left" in r.arm_control_idx:
+            safe_fill("arm_left", r.arm_control_idx["left"])
+        if "right" in r.arm_control_idx:
+            safe_fill("arm_right", r.arm_control_idx["right"])
+        if "combined" in r.arm_control_idx:
+            # If your controller exposes a single combined arm slice
+            safe_fill("arm", r.arm_control_idx["combined"])
+
+    # Grippers (hold at reset pose, typically closed/neutral)
+    if hasattr(r, "gripper_control_idx"):
+        if "left" in r.gripper_control_idx:
+            safe_fill("gripper_left", r.gripper_control_idx["left"])
+        if "right" in r.gripper_control_idx:
+            safe_fill("gripper_right", r.gripper_control_idx["right"])
+
+    return a
+
+
+def overwrite_action_with_hold(action, hold_action_var, hold_action_mask):
+    '''Overwrite action with hold action where mask is 0'''
+    to_device, to_dtype = action.device, action.dtype
+    hold_action_var = hold_action_var.to(device=to_device, dtype=to_dtype)
+    hold_action_mask = hold_action_mask.to(device=to_device, dtype=to_dtype)
+    return (
+        action * hold_action_mask + hold_action_var * (1 - hold_action_mask),
+        hold_action_var,
+        hold_action_mask,
+    )
+
 
 def build_transform(theta, pos_xy, z=0.0) -> np.ndarray:
     """
@@ -1242,11 +1363,18 @@ if __name__ == "__main__":
         step_rewards.update({stage_states[0]['name']: []})
         step_success.update({stage_states[0]['name']: []})
 
+        hold_action_var = build_upper_body_hold_action(env._robot)
+        hold_action_mask = mask_other_actions(env._robot, unmasked_action_type="base")
+
         with Live(make_table(stage_states), console=console, refresh_per_second=4) as live:
             for _, row in df.iterrows():
-                base_pos = obs["robot_r1"]["proprio"][140:142]
-                yaw2d = obs["robot_r1"]["proprio"][149]
+                base_pos = obs["robot_r1::proprio"][140:142]
+                yaw2d = obs["robot_r1::proprio"][149]
                 action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
+
+                action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
+                    action, hold_action_var, hold_action_mask
+                )
 
                 obs, reward_env, terminated_env, truncated_env, info = env.step(action)
                 sub_task_info = info["subtask"]
@@ -1262,8 +1390,8 @@ if __name__ == "__main__":
                     stage_states[idx]["status"] = "failed"
 
                 stage_states[idx]["reward"] = sub_task_info["reward"]
-                step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
-                step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
+                # step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
+                # step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
 
                 # Move to the next stage
                 if sub_task_info["done"] and has_next_stage:

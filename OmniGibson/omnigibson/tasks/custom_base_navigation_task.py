@@ -258,6 +258,11 @@ class BaseNavigationTask(BaseTask):
         self._path_length += T.l2_distance(self._current_robot_pos[:2], new_robot_pos[:2])
         self._current_robot_pos = new_robot_pos
 
+        # Orientation error
+        if done and info["done"]["success"]:
+            heading_error = get_orientation_error(robot=env.robots[self._robot_idn], goal_pos=self.get_goal_pos())
+            orientation_error = -self._reward_config["r_orientation"] * heading_error
+            info['reward']["reward_breakdown"]["orientation_error"] = float(orientation_error.item())
         return reward, done, info
 
     @classproperty
@@ -278,5 +283,6 @@ class BaseNavigationTask(BaseTask):
         return {
             "r_potential": 1.0,
             "r_collision": 1.0,
-            "r_pointgoal": 10.0,
+            "r_pointgoal": 20.0,
+            "r_orientation": 1,
         }

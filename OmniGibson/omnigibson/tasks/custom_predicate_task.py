@@ -140,7 +140,7 @@ class _RelativeStatusTask(BaseTask):
         if self._pred == "next_to" and NextTo in a.states:
             return a.states[NextTo].get_value(b)
         if self._pred == "inside" and Inside in a.states:
-            return a.states[Inside].get_value(b)
+            return b.states[Inside].get_value(a)
         if self._pred == "on_top" and OnTop in a.states:
             return a.states[OnTop].get_value(b)
         return None
