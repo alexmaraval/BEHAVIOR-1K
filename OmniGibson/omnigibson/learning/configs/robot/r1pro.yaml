@@ -25,21 +25,20 @@ action_key_dims:
 controllers:
   use_reward_regularization: false
   use_preprocessing: false
-  base:
-    name: HolonomicBaseJointController
-    motor_type: velocity # position, velocity
-    vel_kp: 150
-#    pos_kp: 150
-    command_input_limits: [[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]
-    command_output_limits: [[-0.75, -0.75, -1.0], [0.75, 0.75, 1.0]]
-    use_impedances: false
 #  base:
 #    name: HolonomicBaseJointController
-#    motor_type: position # position, velocity
-#    pos_kp: 50
-#    command_input_limits: null
-#    command_output_limits: null
+#    motor_type: velocity # position, velocity
+#    vel_kp: 150
+#    command_input_limits: [[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]
+#    command_output_limits: [[-0.75, -0.75, -1.0], [0.75, 0.75, 1.0]]
 #    use_impedances: false
+  base:
+    name: HolonomicBaseJointController
+    motor_type: position # position, velocity
+    pos_kp: 50
+    command_input_limits: null
+    command_output_limits: null
+    use_impedances: false
   trunk:
     name: JointController
     motor_type: position

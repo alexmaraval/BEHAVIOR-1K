@@ -1104,18 +1104,20 @@ if __name__ == "__main__":
                 sub_task_info = info["subtask"]
                 idx = sub_task_info["index"]
                 next_idx = idx + 1
-                has_next_stage = next_idx < len(stage_states)
+                has_next_stage = idx < len(stage_states)
 
                 # Update stage info
                 if sub_task_info["done"]:
+                    next_idx = idx
+                    idx = idx -1
                     stage_states[idx]["status"] = "completed"
                 elif any(sub_task_info.get(k, False) for k in ("falling", "max_collision", "timeout")):
                     console.print("[red]Sub task terminated due to collision/falling/timeout")
                     stage_states[idx]["status"] = "failed"
 
                 stage_states[idx]["reward"] = sub_task_info["reward"]
-                # step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
-                # step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
+                step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
+                step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
 
                 # Move to the next stage
                 if sub_task_info["done"] and has_next_stage:

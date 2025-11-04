@@ -139,10 +139,12 @@ class RobustGraspTask(BaseTask):
             termination_config=None,
             reward_config=None,
             transform_matrix=None,
+            skip_collision_with_objs=None,
     ):
         self._obj_name = obj_name
         self._robot_idn = int(robot_idn)
         self.transform_matrix = transform_matrix
+        self._skip_collision_with_objs_names = skip_collision_with_objs
         super().__init__(termination_config=termination_config, reward_config=reward_config)
 
     def _create_termination_conditions(self):
