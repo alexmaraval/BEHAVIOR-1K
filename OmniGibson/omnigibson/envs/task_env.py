@@ -160,7 +160,10 @@ class TaskCombination:
         if self.sparse_early_sub_goals and (self.current_index < len(self.tasks) - 1):
             reward = 0.0
         if done:
-            if info["done"]["success"]:
+            falling = info['done']['termination_conditions'].get('falling', False)['done']
+            max_collision = info['done']['termination_conditions'].get('max_collision', False)['done']
+            timeout = info['done']['termination_conditions'].get('timeout', False)['done']
+            if info["done"]["success"] and not falling and not max_collision and not timeout:
                 self.current_index += 1
                 return self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
             else:
@@ -213,7 +216,6 @@ class TaskEnv:
         self.subtasks = []
         self._task_stages = None
         self.task_combo: TaskCombination | None = None
-        self.active_subtask = 0
 
         self._subtask = None
         self._stage_idx = 0
@@ -607,7 +609,7 @@ class TaskEnv:
                 flush=True,
             )
         if terminated_ep:
-            print(f"Subtask {self.active_subtask} terminated.\n{info_out['subtask']}", flush=True)
+            print(f"Subtask {self._stage_idx} terminated.\n{info_out['subtask']}", flush=True)
             if terminated_env:
                 self._write_video(obs, done=True)
 

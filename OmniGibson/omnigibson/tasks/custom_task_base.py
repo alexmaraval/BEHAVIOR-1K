@@ -1,6 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from copy import deepcopy
 
+from omnigibson.tasks.task_utils import _get_named
 from omnigibson.utils.python_utils import Registerable, classproperty
 
 REGISTERED_TASKS = dict()
@@ -53,7 +54,8 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         self._info = None
 
         # Skip collisions with objects
-        self.skip_collisions_objs = []
+        self._skip_collision_with_objs_names = None
+        self.skip_collision_objs = []
 
         # Run super init
         super().__init__()
@@ -85,6 +87,14 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         Args:
             env (Environment): environment instance to reset
         """
+        # Resolve skip-collision objects by name
+        self.skip_collision_objs = []
+        if self._skip_collision_with_objs_names:
+            for name in self._skip_collision_with_objs_names:
+                obj = _get_named(env, name)
+                if obj is not None:
+                    self.skip_collision_objs.append(obj)
+
         self._reward = None
         self._done = False
         self._success = False

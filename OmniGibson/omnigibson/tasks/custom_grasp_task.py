@@ -113,7 +113,8 @@ class _SimpleGraspReward(BaseRewardFunction):
         shaped = math.exp(-float(dist)) * self._dist_coeff
         shaped = shaped * (self._r_grasp / (max_steps * max_shaping_per_step))
         robot = env.robots[0]
-        coll = detect_robot_collision_in_sim(robot, filter_objs=[obj])
+        floors = list(env.scene.object_registry("category", "floors", []))
+        coll = detect_robot_collision_in_sim(robot, filter_objs=[obj] + floors)
         pen = (-self._collision_penalty) if coll else 0.0
         return shaped + pen, {
             "grasp_success": False,
@@ -139,10 +140,12 @@ class RobustGraspTask(BaseTask):
             termination_config=None,
             reward_config=None,
             transform_matrix=None,
+            skip_collision_with_objs=None,
     ):
         self._obj_name = obj_name
         self._robot_idn = int(robot_idn)
         self.transform_matrix = transform_matrix
+        self._skip_collision_with_objs_names = skip_collision_with_objs
         super().__init__(termination_config=termination_config, reward_config=reward_config)
 
     def _create_termination_conditions(self):
