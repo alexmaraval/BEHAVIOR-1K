@@ -164,7 +164,10 @@ class TaskCombination:
         if self.sparse_early_sub_goals and (self.current_index < len(self.tasks) - 1):
             reward = 0.0
         if done:
-            if info["done"]["success"]:
+            falling = info['done']['termination_conditions'].get('falling', False)['done']
+            max_collision = info['done']['termination_conditions'].get('max_collision', False)['done']
+            timeout = info['done']['termination_conditions'].get('timeout', False)['done']
+            if info["done"]["success"] and not falling and not max_collision and not timeout:
                 self.current_index += 1
                 return self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
             else:
@@ -185,6 +188,7 @@ class TaskEnv:
             instance_id: int | None = None,
             max_steps: int | None = None,
             use_domain_randomization: bool = False,
+            subtask_index: int | None = None,
     ) -> None:
         """
         Initialize the TaskEnv environment and load all required components.
@@ -204,6 +208,7 @@ class TaskEnv:
         self.use_domain_randomization = use_domain_randomization
         self._robot = None
         self.robot_type = "R1Pro"
+        self.subtask_index = subtask_index
 
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
@@ -217,7 +222,6 @@ class TaskEnv:
         self.subtasks = []
         self._task_stages = None
         self.task_combo: TaskCombination | None = None
-        self.active_subtask = 0
 
         self._subtask = None
         self._stage_idx = 0
@@ -381,7 +385,7 @@ class TaskEnv:
         Returns:
             None
         """
-        self._task_stages = get_sub_tasks(task_name=self.task_name)
+        self._task_stages = get_sub_tasks(task_name=self.task_name, subtask_index=self.subtask_index)
         self.subtasks = []
         for sub_task_map in self._task_stages or []:
             sub_task = sub_task_map.get("factory")
@@ -545,6 +549,7 @@ class TaskEnv:
         }
 
         sub_task_terminated = False
+        combo_done = False
         if self.task_combo is not None and self.subtasks:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
             info_s = info_s or {}
@@ -553,7 +558,6 @@ class TaskEnv:
             name = None
             if self._stage_idx < len(self.subtasks):
                 name = self._task_stages[self._stage_idx]["name"]
-
             falling = False
             max_collision = False
             timeout = False
@@ -603,7 +607,7 @@ class TaskEnv:
         info_out = info_env
         info_out["subtask"] = subtask_info
         info_out["all_subtasks_complete"] = self._completed
-        terminated_ep = terminated_env or sub_task_terminated
+        terminated_ep = terminated_env or sub_task_terminated or combo_done
 
         if info_out["subtask"]["success"]:
             print(
@@ -612,9 +616,9 @@ class TaskEnv:
                 flush=True,
             )
         if terminated_ep:
-            print(f"Subtask {self.active_subtask} terminated.\n{info_out['subtask']}", flush=True)
-            if terminated_env:
-                self._write_video(obs, done=True)
+            print(f"Subtask {self._stage_idx} terminated.\n{info_out['subtask']}", flush=True)
+
+        self._write_video(obs, done=terminated_ep)
 
         return obs, reward_env, terminated_ep, truncated_env, info_out
 
@@ -692,7 +696,8 @@ class TaskEnv:
                 cam_pose = T.mat2pose(th.tensor(np.linalg.inv(np.reshape(direct_cam_pose, [4, 4]).T), dtype=th.float32))
                 cam_rel_poses.append(th.cat(T.relative_pose_transform(*cam_pose, *base_pose)))
         obs["robot_r1::cam_rel_poses"] = th.cat(cam_rel_poses, axis=-1)
-        obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
+        if self.cfg.robot.controllers.get("use_proprio_preprocessing", True):
+            obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
         for k in obs:
             if "rgb" in k:
                 obs[k] = self._preprocess_rgb(obs[k])
@@ -1380,18 +1385,20 @@ if __name__ == "__main__":
                 sub_task_info = info["subtask"]
                 idx = sub_task_info["index"]
                 next_idx = idx + 1
-                has_next_stage = next_idx < len(stage_states)
+                has_next_stage = idx < len(stage_states)
 
                 # Update stage info
                 if sub_task_info["done"]:
+                    next_idx = idx
+                    idx = idx -1
                     stage_states[idx]["status"] = "completed"
                 elif any(sub_task_info.get(k, False) for k in ("falling", "max_collision", "timeout")):
                     console.print("[red]Sub task terminated due to collision/falling/timeout")
                     stage_states[idx]["status"] = "failed"
 
                 stage_states[idx]["reward"] = sub_task_info["reward"]
-                # step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
-                # step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
+                step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
+                step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
 
                 # Move to the next stage
                 if sub_task_info["done"] and has_next_stage:

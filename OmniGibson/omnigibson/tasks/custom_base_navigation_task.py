@@ -5,7 +5,8 @@ from omnigibson.reward_functions.point_goal_reward import PointGoalReward
 from omnigibson.reward_functions.potential_reward import PotentialReward
 from omnigibson.scenes.traversable_scene import TraversableScene
 from omnigibson.tasks.custom_task_base import BaseTask
-from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _CollisionRewardFiltered, _get_named, _front_target, get_orientation_error
+from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _CollisionRewardFiltered, _get_named, _front_target, \
+    get_orientation_error
 from omnigibson.termination_conditions.falling import Falling
 from omnigibson.termination_conditions.point_goal import PointGoal
 from omnigibson.termination_conditions.timeout import Timeout
@@ -43,18 +44,18 @@ class BaseNavigationTask(BaseTask):
     """
 
     def __init__(
-        self,
-        target_object_name: str,
-        front_offset: float = 0.0,
-        robot_idn=0,
-        floor=0,
-        goal_pos=None,
-        goal_tolerance=0.5,
-        path_range=None,
-        reward_type="l2",
-        termination_config=None,
-        reward_config=None,
-        skip_collision_with_objs=None,
+            self,
+            target_object_name: str,
+            front_offset: float = 0.0,
+            robot_idn=0,
+            floor=0,
+            goal_pos=None,
+            goal_tolerance=0.5,
+            path_range=None,
+            reward_type="l2",
+            termination_config=None,
+            reward_config=None,
+            skip_collision_with_objs=None,
     ):
         # Store inputs
         self._target_object_name = target_object_name
@@ -69,7 +70,6 @@ class BaseNavigationTask(BaseTask):
 
         # Collision-skip support: store names and resolved objects
         self._skip_collision_with_objs_names = skip_collision_with_objs
-        self.skip_collision_objs = []
 
         # Create other attributes that will be filled in at runtime
         self._path_length = None
@@ -110,10 +110,10 @@ class BaseNavigationTask(BaseTask):
         rewards["collision"] = _CollisionRewardFiltered(
             self, robot_idn=self._robot_idn, r_collision=self._reward_config["r_collision"]
         )
-        rewards["pointgoal"] = PointGoalReward(
-            pointgoal=self._termination_conditions["pointgoal"],
-            r_pointgoal=self._reward_config["r_pointgoal"],
-        )
+        # rewards["pointgoal"] = PointGoalReward(
+        #     pointgoal=self._termination_conditions["pointgoal"],
+        #     r_pointgoal=self._reward_config["r_pointgoal"],
+        # )
 
         return rewards
 
@@ -187,14 +187,6 @@ class BaseNavigationTask(BaseTask):
         # Store only the position tensor (x,y,z), not the full (pos, quat) tuple
         self._geodesic_dist = self._get_geodesic_potential(env)
 
-        # Resolve skip-collision objects by name
-        self.skip_collision_objs = []
-        if self._skip_collision_with_objs_names:
-            for name in self._skip_collision_with_objs_names:
-                obj = _get_named(env, name)
-                if obj is not None:
-                    self.skip_collision_objs.append(obj)
-
         super().reset(env)
 
     def _global_pos_to_robot_frame(self, env, pos):
@@ -210,7 +202,6 @@ class BaseNavigationTask(BaseTask):
         """
         delta_pos_global = pos - env.robots[self._robot_idn].states[Pose].get_value()[0]
         return T.quat2mat(env.robots[self._robot_idn].states[Pose].get_value()[1]).T @ delta_pos_global
-
 
     def get_goal_pos(self):
         """
@@ -283,6 +274,6 @@ class BaseNavigationTask(BaseTask):
         return {
             "r_potential": 1.0,
             "r_collision": 10.0,
-            "r_pointgoal": 50.0,
+            # "r_pointgoal": 50.0,
             "r_orientation": 1,
         }

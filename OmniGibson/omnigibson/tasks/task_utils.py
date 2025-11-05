@@ -45,7 +45,7 @@ class _MaxCollisionFiltered(MaxCollision):
         ignore_objs = tuple(list(ignore_objs) + extra_ignores)
         in_contact = len(robot.states[ContactBodies].get_value(ignore_objs=ignore_objs)) > 0
         self._n_collisions += int(in_contact)
-        return self._n_collisions > self._max_collisions
+        return self._n_collisions >= self._max_collisions
 
 
 class _CollisionRewardFiltered(CollisionReward):

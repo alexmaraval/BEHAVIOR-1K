@@ -1,6 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from copy import deepcopy
 
+from omnigibson.tasks.task_utils import _get_named
 from omnigibson.utils.python_utils import Registerable, classproperty
 
 REGISTERED_TASKS = dict()
@@ -22,7 +23,7 @@ class BaseTask(Registerable, metaclass=ABCMeta):
             in with the default config. See cls.default_reward_config for default values used
     """
 
-    def __init__(self, termination_config=None, reward_config=None, include_obs=True):
+    def __init__(self, termination_config=None, reward_config=None, robot_idn=0):
         # Make sure configs are dictionaries
         termination_config = dict() if termination_config is None else termination_config
         reward_config = dict() if reward_config is None else reward_config
@@ -35,6 +36,8 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         ), f"Got unknown termination config keys inputted: {unknown_termination_keys}"
         unknown_reward_keys = set(reward_config.keys()) - set(self.default_reward_config.keys())
         assert len(unknown_reward_keys) == 0, f"Got unknown reward config keys inputted: {unknown_reward_keys}"
+
+        self._robot_idn = robot_idn
 
         # Combine with defaults and store internally
         self._termination_config = self.default_termination_config
@@ -53,7 +56,8 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         self._info = None
 
         # Skip collisions with objects
-        self.skip_collisions_objs = []
+        self._skip_collision_with_objs_names = None
+        self.skip_collision_objs = []
 
         # Run super init
         super().__init__()
@@ -85,6 +89,14 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         Args:
             env (Environment): environment instance to reset
         """
+        # Resolve skip-collision objects by name
+        self.skip_collision_objs = []
+        if self._skip_collision_with_objs_names:
+            for name in self._skip_collision_with_objs_names:
+                obj = _get_named(env, name)
+                if obj is not None:
+                    self.skip_collision_objs.append(obj)
+
         self._reward = None
         self._done = False
         self._success = False
