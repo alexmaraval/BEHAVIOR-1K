@@ -37,6 +37,8 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         unknown_reward_keys = set(reward_config.keys()) - set(self.default_reward_config.keys())
         assert len(unknown_reward_keys) == 0, f"Got unknown reward config keys inputted: {unknown_reward_keys}"
 
+        self._robot_idn = robot_idn
+
         # Combine with defaults and store internally
         self._termination_config = self.default_termination_config
         self._termination_config.update(termination_config)
@@ -52,7 +54,6 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         self._done = None
         self._success = None
         self._info = None
-        self._robot_idn = robot_idn
 
         # Skip collisions with objects
         self._skip_collision_with_objs_names = None

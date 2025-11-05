@@ -316,6 +316,17 @@ class SufficientlyOpenTask(BaseTask):
         done_out = any(d.get("done", False) for d in tc.values())
         return float(dense), done_out, info
 
+    @classproperty
+    def default_termination_config(cls):
+        return {
+            "max_collisions": 1,
+            "max_steps": 500,
+            "fall_height": 0.03,
+        }
+
+    @classproperty
+    def default_reward_config(cls):
+        return {}
 
 class SufficientlyClosedTask(SufficientlyOpenTask):
     def __init__(

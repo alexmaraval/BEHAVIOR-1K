@@ -40,7 +40,7 @@ class _PredicateToggleTask(BaseTask):
             robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]
         )
         terminations["object_falling"] = ObjectFalling(obj_name=self._target_object_name,
-                                                       fall_height=self._termination_config["fall_height"]),
+                                                       fall_height=self._termination_config["fall_height"])
 
 
         return terminations
@@ -147,9 +147,9 @@ class _RelativeStatusTask(BaseTask):
             robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]
         )
         terminations["object_falling"] = ObjectFalling(obj_name=self._source_object_name,
-                                        fall_height=self._termination_config["fall_height"]),
-        terminations["object_falling"] = ObjectFalling(obj_name=self._target_object_name,
-                                                       fall_height=self._termination_config["fall_height"]),
+                                        fall_height=self._termination_config["fall_height"])
+        # terminations["object_falling"] = ObjectFalling(obj_name=self._target_object_name,
+        #                                                fall_height=self._termination_config["fall_height"])
 
         return terminations
 
