@@ -969,7 +969,7 @@ class TaskIKEnv(TaskEnv):
 
         obs = self._preprocess_obs(obs)
         
-        # Create sub task info
+         # Create sub task info
         subtask_info = {
             "name": None,
             "index": self._stage_idx,
@@ -985,35 +985,36 @@ class TaskIKEnv(TaskEnv):
         }
 
         sub_task_terminated = False
+        combo_done = False
         if self.task_combo is not None and self.subtasks:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
             info_s = info_s or {}
             success = bool(info_s["done"]["success"])
-            self._stage_idx = min(self.task_combo.current_index, len(self.subtasks))
+            self._stage_idx = min(self.task_combo.current_index, len(self.subtasks) - 1)
             name = None
             if self._stage_idx < len(self.subtasks):
                 name = self._task_stages[self._stage_idx]["name"]
-
             falling = False
             max_collision = False
             timeout = False
             try:
-                if "falling" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "falling" in info_s["done"]["termination_conditions"]:
                     falling = info_s["done"]["termination_conditions"]["falling"]["done"]
             except Exception as e:
-                print(f"Stage {name}, falling check error: {e}")
+                print(f"Stage {name}, falling check error: {e}, {info_s}")
 
             try:
-                if "max_collision" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "max_collision" in info_s["done"][
+                    "termination_conditions"]:
                     max_collision = info_s["done"]["termination_conditions"]["max_collision"]["done"]
             except Exception as e:
-                print(f"Stage {name}, max_collision check error: {e}")
+                print(f"Stage {name}, max_collision check error: {e}, {info_s}")
 
             try:
-                if "timeout" in info_s["done"]["termination_conditions"]:
+                if "termination_conditions" in info_s["done"] and "timeout" in info_s["done"]["termination_conditions"]:
                     timeout = info_s["done"]["termination_conditions"]["timeout"]["done"]
             except Exception as e:
-                print(f"Stage {name}, timeout check error: {e}")
+                print(f"Stage {name}, timeout check error: {e}, {info_s}")
 
             sub_task_terminated = any([falling, max_collision, timeout])
 
@@ -1042,19 +1043,18 @@ class TaskIKEnv(TaskEnv):
         info_out = info_env
         info_out["subtask"] = subtask_info
         info_out["all_subtasks_complete"] = self._completed
-        terminated_env = terminated_env or sub_task_terminated
+        terminated_ep = terminated_env or sub_task_terminated or combo_done
 
-        if terminated_env:
-            if info_out["subtask"]["success"]:
-                print(
-                    f"Subtask {self._stage_idx} done! {len(self.subtasks) - self._stage_idx - 1} more to go.\n"
-                    f"Collected subtask {self._stage_idx} reward: {info_out['subtask']['reward']}",
-                    flush=True,
-                )
-            else:
-                print(f"Subtask {self.active_subtask} terminated.\n{info_s['done']}", flush=True)
-        
-        self._write_video(obs, done=terminated_env or truncated_env)
+        if info_out["subtask"]["success"]:
+            print(
+                f"Subtask {self._stage_idx} done! {len(self.subtasks) - self._stage_idx - 1} more to go.\n"
+                f"Collected subtask {self._stage_idx} reward: {info_out['subtask']['reward']}",
+                flush=True,
+            )
+        if terminated_ep:
+            print(f"Subtask {self._stage_idx} terminated.\n{info_out['subtask']}", flush=True)
+
+        self._write_video(obs, done=terminated_ep)
 
         return obs, reward_env, terminated_env, truncated_env, info_out
 
