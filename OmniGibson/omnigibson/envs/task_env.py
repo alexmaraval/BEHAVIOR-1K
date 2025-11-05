@@ -160,7 +160,12 @@ class TaskCombination:
         if self.sparse_early_sub_goals and (self.current_index < len(self.tasks) - 1):
             reward = 0.0
         if done:
-            if info["done"]["success"]:
+            falling = info['done']['termination_conditions']['falling']['done'] if 'falling' in info['done'][
+                'termination_conditions'] else False
+            max_collision = info['done']['termination_conditions']['max_collision']['done'] if 'max_collision' in \
+                                                                                               info['done'][
+                                                                                                   'termination_conditions'] else False
+            if info["done"]["success"] and not falling and not max_collision:
                 self.current_index += 1
                 return self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
             else:
@@ -181,6 +186,7 @@ class TaskEnv:
             instance_id: int | None = None,
             max_steps: int | None = None,
             use_domain_randomization: bool = False,
+            subtask_index: int | None = None,
     ) -> None:
         """
         Initialize the TaskEnv environment and load all required components.
@@ -200,6 +206,7 @@ class TaskEnv:
         self.use_domain_randomization = use_domain_randomization
         self._robot = None
         self.robot_type = "R1Pro"
+        self.subtask_index = subtask_index
 
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
@@ -377,7 +384,7 @@ class TaskEnv:
         Returns:
             None
         """
-        self._task_stages = get_sub_tasks(task_name=self.task_name)
+        self._task_stages = get_sub_tasks(task_name=self.task_name, subtask_index=self.subtask_index)
         self.subtasks = []
         for sub_task_map in self._task_stages or []:
             sub_task = sub_task_map.get("factory")
@@ -597,21 +604,20 @@ class TaskEnv:
         info_out = info_env
         info_out["subtask"] = subtask_info
         info_out["all_subtasks_complete"] = self._completed
-        terminated_env = terminated_env or sub_task_terminated
+        terminated_ep = terminated_env or sub_task_terminated
 
-        if terminated_env:
-            if info_out["subtask"]["success"]:
-                print(
-                    f"Subtask {self._stage_idx} done! {len(self.subtasks) - self._stage_idx - 1} more to go.\n"
-                    f"Collected subtask {self._stage_idx} reward: {info_out['subtask']['reward']}",
-                    flush=True,
-                )
-            else:
-                print(f"Subtask {self.active_subtask} terminated.\n{info_out['subtask']}", flush=True)
+        if info_out["subtask"]["success"]:
+            print(
+                f"Subtask {self._stage_idx} done! {len(self.subtasks) - self._stage_idx - 1} more to go.\n"
+                f"Collected subtask {self._stage_idx} reward: {info_out['subtask']['reward']}",
+                flush=True,
+            )
+        if terminated_ep:
+            print(f"Subtask {self.active_subtask} terminated.\n{info_out['subtask']}", flush=True)
 
-        self._write_video(obs, done=terminated_env or truncated_env)
+        self._write_video(obs, done=terminated_ep)
 
-        return obs, reward_env, terminated_env, truncated_env, info_out
+        return obs, reward_env, terminated_ep, truncated_env, info_out
 
     def close(self) -> None:
         """
@@ -730,16 +736,24 @@ class TaskEnv:
                 self.frames = frame
 
             if done:
+                if self.frames is None or len(self.frames) == 0:
+                    print("Warning: done=True but no frames collected — skipping video save")
+                    return
                 date_str = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
                 video_name = str(self.video_path) + f"/{self.task_name}_{date_str}.mkv"
-                video_writer = create_video_writer(fpath=video_name, resolution=(448, 1120))
-                write_video(
-                    self.frames,
-                    video_writer=video_writer,
-                    batch_size=1,
-                    mode="rgb",
-                )
-                del video_writer
+                container, stream = create_video_writer(fpath=video_name, resolution=(448, 1120))
+                try:
+                    write_video(
+                        self.frames,
+                        video_writer=(container, stream),
+                        batch_size=1,
+                        mode="rgb",
+                    )
+                    # flush any remaining packets
+                    for packet in stream.encode(None):
+                        container.mux(packet)
+                finally:
+                    container.close()
 
     @staticmethod
     def collect_tokens_and_entries(data: dict) -> tuple[dict[str, dict], dict]:

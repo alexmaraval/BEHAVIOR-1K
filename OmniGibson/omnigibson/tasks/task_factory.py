@@ -12,8 +12,11 @@ max_steps = 5000
 task_factory = {}
 
 
-def get_sub_tasks(task_name: str) -> list[dict[str, ...]]:
-    return task_factory[task_name]
+def get_sub_tasks(task_name: str, subtask_index: int | None = None) -> list[dict[str, ...]]:
+    if subtask_index is not None:
+        return [task_factory[task_name][subtask_index]]
+    else:
+        return task_factory[task_name]
 
 
 # -----turning_on_radio-----
@@ -38,6 +41,7 @@ tr_grasp_radio = partial(
     obj_name=name_radio,
     termination_config={"max_steps": 5000},
     transform_matrix=radio_handle_transform,
+    skip_collision_with_objs=[name_radio]
 )
 
 tr_radio_on = partial(
