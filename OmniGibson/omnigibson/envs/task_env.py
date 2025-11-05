@@ -545,11 +545,12 @@ class TaskEnv:
 
         sub_task_terminated = False
         combo_done = False
+        _new_stage_idx = self._stage_idx
         if self.task_combo is not None and self.subtasks:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
             info_s = info_s or {}
             success = bool(info_s["done"]["success"])
-            self._stage_idx = min(self.task_combo.current_index, len(self.subtasks) - 1)
+            _new_stage_idx = min(self.task_combo.current_index, len(self.subtasks) - 1)
             name = None
             if self._stage_idx < len(self.subtasks):
                 name = self._task_stages[self._stage_idx]["name"]
@@ -614,6 +615,8 @@ class TaskEnv:
             print(f"Subtask {self._stage_idx} terminated.\n{info_out['subtask']}", flush=True)
 
         self._write_video(obs, done=terminated_ep)
+
+        self._stage_idx = _new_stage_idx
 
         return obs, reward_env, terminated_ep, truncated_env, info_out
 
