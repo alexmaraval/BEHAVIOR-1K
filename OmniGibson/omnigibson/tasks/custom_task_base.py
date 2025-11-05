@@ -23,7 +23,7 @@ class BaseTask(Registerable, metaclass=ABCMeta):
             in with the default config. See cls.default_reward_config for default values used
     """
 
-    def __init__(self, termination_config=None, reward_config=None, include_obs=True):
+    def __init__(self, termination_config=None, reward_config=None, robot_idn=0):
         # Make sure configs are dictionaries
         termination_config = dict() if termination_config is None else termination_config
         reward_config = dict() if reward_config is None else reward_config
@@ -52,6 +52,7 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         self._done = None
         self._success = None
         self._info = None
+        self._robot_idn = robot_idn
 
         # Skip collisions with objects
         self._skip_collision_with_objs_names = None
