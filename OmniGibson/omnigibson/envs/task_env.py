@@ -923,7 +923,17 @@ class TaskIKEnv(TaskEnv):
                 self.curr_velocity_left_gripper,
                 self.curr_velocity_right_gripper,
             ], dim=-1)
+
+            prev = torch.cat([
+                self.prev_velocity_left_arm,
+                self.prev_velocity_right_arm,
+                self.prev_velocity_torso,
+                self.prev_velocity_left_gripper,
+                self.prev_velocity_right_gripper,
+            ], dim=-1)
+
             arm_velocity_reg = reward_arm_vel_regularization(curr)
+            arm_velocity_change_reg = reward_arm_vel_change_regularization(prev, curr)
 
             prev = torch.cat([
                 self.prev_angle_left_arm,
@@ -941,7 +951,7 @@ class TaskIKEnv(TaskEnv):
             ], dim=-1)
             arm_position_change_reg = reward_arm_pos_change_regularization(prev, curr)
             reward_env += (
-                            0.05 * base_velocity_change_reg + 0.05 * arm_velocity_reg + 0.05 * arm_position_change_reg
+                            0.01 * base_velocity_change_reg + 0.01 * arm_velocity_reg + 0.01 * arm_position_change_reg + 0.001 * arm_velocity_change_reg
                           )
 
             self.prev_lin_velocity_base = self.curr_lin_velocity_base
