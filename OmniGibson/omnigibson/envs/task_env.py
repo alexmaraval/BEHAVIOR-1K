@@ -1031,6 +1031,38 @@ def make_table(stage_states):
     return table
 
 
+class TaskEnvRepeatWrapper(TaskEnv):
+    def __init__(
+            self,
+            config: dict[str, ...],
+            motor_type: str = "position",
+            instance_id: int | None = None,
+            max_steps: int | None = None,
+            use_domain_randomization: bool = False,
+            subtask_index: int | None = None,
+            action_repeat: int = 1,
+    ):
+        super().__init__(
+            config=config,
+            motor_type=motor_type,
+            instance_id=instance_id,
+            max_steps=max_steps,
+            use_domain_randomization=use_domain_randomization,
+            subtask_index=subtask_index
+        )
+        assert action_repeat >= 1, action_repeat
+        self.action_repeat = action_repeat
+
+    def step(self, action: th.Tensor) -> tuple[dict, float, bool, bool, dict]:
+        reward_env_acc = 0
+        for step in range(self.action_repeat):
+            obs, reward_env, terminated_ep, truncated_env, info_out = super().step(action)
+            reward_env_acc += reward_env
+            if terminated_ep or truncated_env:
+                return obs, reward_env_acc, terminated_ep, truncated_env, info_out
+        return obs, reward_env_acc, terminated_ep, truncated_env, info_out
+
+
 if __name__ == "__main__":
     """
     Usage:
