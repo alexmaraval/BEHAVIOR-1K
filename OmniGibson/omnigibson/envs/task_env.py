@@ -544,6 +544,7 @@ class TaskEnv:
         }
 
         sub_task_terminated = False
+        combo_done = False
         if self.task_combo is not None and self.subtasks:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
             info_s = info_s or {}
@@ -601,7 +602,7 @@ class TaskEnv:
         info_out = info_env
         info_out["subtask"] = subtask_info
         info_out["all_subtasks_complete"] = self._completed
-        terminated_ep = terminated_env or sub_task_terminated
+        terminated_ep = terminated_env or sub_task_terminated or combo_done
 
         if info_out["subtask"]["success"]:
             print(
@@ -613,9 +614,6 @@ class TaskEnv:
             print(f"Subtask {self._stage_idx} terminated.\n{info_out['subtask']}", flush=True)
 
         self._write_video(obs, done=terminated_ep)
-
-        # if abs(reward_env) > 1:
-        #     breakpoint()
 
         return obs, reward_env, terminated_ep, truncated_env, info_out
 

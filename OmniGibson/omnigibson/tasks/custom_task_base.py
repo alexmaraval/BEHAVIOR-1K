@@ -27,7 +27,6 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         # Make sure configs are dictionaries
         termination_config = dict() if termination_config is None else termination_config
         reward_config = dict() if reward_config is None else reward_config
-        self._robot_idn = robot_idn
 
         # Sanity check termination and reward conditions -- any keys found in the inputted config but NOT
         # found in the default config should raise an error
@@ -37,6 +36,8 @@ class BaseTask(Registerable, metaclass=ABCMeta):
         ), f"Got unknown termination config keys inputted: {unknown_termination_keys}"
         unknown_reward_keys = set(reward_config.keys()) - set(self.default_reward_config.keys())
         assert len(unknown_reward_keys) == 0, f"Got unknown reward config keys inputted: {unknown_reward_keys}"
+
+        self._robot_idn = robot_idn
 
         # Combine with defaults and store internally
         self._termination_config = self.default_termination_config
