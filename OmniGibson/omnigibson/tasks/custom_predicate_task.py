@@ -5,20 +5,19 @@ from omnigibson.object_states.open_state import Open
 from omnigibson.object_states.robot_related_states import IsGrasping
 from omnigibson.object_states.toggle import ToggledOn
 from omnigibson.tasks.custom_task_base import BaseTask
-from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _get_named
-from omnigibson.termination_conditions.falling import Falling, ObjectFalling
+from omnigibson.tasks.task_utils import _get_named
 from omnigibson.termination_conditions.timeout import Timeout
 from omnigibson.utils.python_utils import classproperty
 
 
 class _PredicateToggleTask(BaseTask):
     def __init__(
-            self,
-            target_object_name: str,
-            desired_predicate: str,
-            desired_value: bool,
-            termination_config=None,
-            reward_config=None,
+        self,
+        target_object_name: str,
+        desired_predicate: str,
+        desired_value: bool,
+        termination_config=None,
+        reward_config=None,
     ):
         self._target_object_name = target_object_name
         self._pred = desired_predicate.lower()
@@ -30,22 +29,17 @@ class _PredicateToggleTask(BaseTask):
         super().__init__(termination_config=term_cfg, reward_config=reward_config)
 
     def _create_termination_conditions(self):
-        terminations = dict()
-
-        terminations["max_collision"] = _MaxCollisionFiltered(
-            self, max_collisions=self._termination_config["max_collisions"]
-        )
-        terminations["timeout"] = Timeout(max_steps=self._termination_config["max_steps"])
-        terminations["falling"] = Falling(
-            robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]
-        )
-        terminations["object_falling"] = ObjectFalling(obj_name=self._target_object_name,
-                                                       fall_height=self._termination_config["fall_height"]),
-
-
-        return terminations
+        return {"timeout": Timeout(max_steps=self._termination_config["max_steps"])}
 
     def _create_reward_functions(self):
+        return {}
+
+    @classproperty
+    def default_termination_config(cls):
+        return {"max_steps": 3000}
+
+    @classproperty
+    def default_reward_config(cls):
         return {}
 
     def reset(self, env):
@@ -90,17 +84,6 @@ class _PredicateToggleTask(BaseTask):
         reward = self._reward_config.get("r_offset", 0.0)
         return reward, done_out, info
 
-    @classproperty
-    def default_termination_config(cls):
-        return {
-            "max_collisions": 1,
-            "max_steps": 500,
-            "fall_height": 0.03,
-        }
-
-    @classproperty
-    def default_reward_config(cls):
-        return {}
 
 class OnTask(_PredicateToggleTask):
     def __init__(self, target_object_name: str, **kwargs):
@@ -119,13 +102,13 @@ class CloseTask(_PredicateToggleTask):
 
 class _RelativeStatusTask(BaseTask):
     def __init__(
-            self,
-            target_object_name: str,
-            source_object_name: str,
-            desired_predicate: str,
-            desired_value: bool,
-            termination_config=None,
-            reward_config=None,
+        self,
+        target_object_name: str,
+        source_object_name: str,
+        desired_predicate: str,
+        desired_value: bool,
+        termination_config=None,
+        reward_config=None,
     ):
         self._target_object_name = target_object_name
         self._source_object_name = source_object_name
@@ -137,23 +120,17 @@ class _RelativeStatusTask(BaseTask):
         super().__init__(termination_config=term_cfg, reward_config=reward_config or {})
 
     def _create_termination_conditions(self):
-        terminations = dict()
-
-        terminations["max_collision"] = _MaxCollisionFiltered(
-            self, max_collisions=self._termination_config["max_collisions"]
-        )
-        terminations["timeout"] = Timeout(max_steps=self._termination_config["max_steps"])
-        terminations["falling"] = Falling(
-            robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]
-        )
-        terminations["object_falling"] = ObjectFalling(obj_name=self._source_object_name,
-                                        fall_height=self._termination_config["fall_height"]),
-        terminations["object_falling"] = ObjectFalling(obj_name=self._target_object_name,
-                                                       fall_height=self._termination_config["fall_height"]),
-
-        return terminations
+        return {"timeout": Timeout(max_steps=self._termination_config["max_steps"])}
 
     def _create_reward_functions(self):
+        return {}
+
+    @classproperty
+    def default_termination_config(cls):
+        return {"max_steps": 3000}
+
+    @classproperty
+    def default_reward_config(cls):
         return {}
 
     def reset(self, env):
@@ -167,6 +144,7 @@ class _RelativeStatusTask(BaseTask):
         if self._pred == "on_top" and OnTop in a.states:
             return a.states[OnTop].get_value(b)
         return None
+
 
     def step(self, env, action):
         info = {"done": {"success": False, "termination_conditions": {}}}
@@ -205,18 +183,6 @@ class _RelativeStatusTask(BaseTask):
         done_out = any(d.get("done", False) for d in tc.values())
         return reward_offset, done_out, info
 
-    @classproperty
-    def default_termination_config(cls):
-        return {
-            "max_collisions": 1,
-            "max_steps": 500,
-            "fall_height": 0.03,
-        }
-
-    @classproperty
-    def default_reward_config(cls):
-        return {}
-
 
 class NextToTask(_RelativeStatusTask):
     def __init__(self, target_object_name: str, source_object_name: str, desired_value: bool = True, **kwargs):
@@ -253,13 +219,13 @@ class OnTopTask(_RelativeStatusTask):
 
 class OnTopStableTask(BaseTask):
     def __init__(
-            self,
-            target_object_name: str,
-            source_object_name: str,
-            xy_tol: float = 0.23,  # center alignment tolerance
-            require_release: bool = True,  # must not be grasped by robot
-            termination_config=None,
-            reward_config=None,
+        self,
+        target_object_name: str,
+        source_object_name: str,
+        xy_tol: float = 0.23,  # center alignment tolerance
+        require_release: bool = True,  # must not be grasped by robot
+        termination_config=None,
+        reward_config=None,
     ):
         self._tgt = target_object_name
         self._src = source_object_name
@@ -275,6 +241,7 @@ class OnTopStableTask(BaseTask):
 
     def _create_reward_functions(self):
         return {}
+
 
     @classproperty
     def default_termination_config(cls):

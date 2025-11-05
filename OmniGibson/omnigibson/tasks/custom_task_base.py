@@ -23,10 +23,11 @@ class BaseTask(Registerable, metaclass=ABCMeta):
             in with the default config. See cls.default_reward_config for default values used
     """
 
-    def __init__(self, termination_config=None, reward_config=None, include_obs=True):
+    def __init__(self, termination_config=None, reward_config=None, robot_idn=0):
         # Make sure configs are dictionaries
         termination_config = dict() if termination_config is None else termination_config
         reward_config = dict() if reward_config is None else reward_config
+        self._robot_idn = robot_idn
 
         # Sanity check termination and reward conditions -- any keys found in the inputted config but NOT
         # found in the default config should raise an error

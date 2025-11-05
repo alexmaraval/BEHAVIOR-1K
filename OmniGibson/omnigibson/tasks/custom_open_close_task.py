@@ -1,8 +1,6 @@
 import math
 from omnigibson.object_states.open_state import _compute_joint_threshold
 from omnigibson.tasks.custom_task_base import BaseTask
-from omnigibson.tasks.task_utils import _MaxCollisionFiltered
-from omnigibson.termination_conditions.falling import Falling
 from omnigibson.termination_conditions.timeout import Timeout
 from omnigibson.utils.constants import JointType
 from omnigibson.utils.python_utils import classproperty
@@ -214,30 +212,28 @@ class SufficientlyOpenTask(BaseTask):
             status: str = "open",
             termination_config=None,
             reward_config=None,
-            skip_collision_with_objs=None,
     ):
         self._target = target_object_name
         self._allowed_deg = float(allowed_deg)
         self._allowed_frac = float(allowed_frac)
         self._status = status
         self._prev_progress = None
-        self._skip_collision_with_objs_names = skip_collision_with_objs
         term_cfg = dict(termination_config or {})
         term_cfg.setdefault("max_steps", 4000)
         super().__init__(termination_config=term_cfg, reward_config=reward_config or {})
 
     def _create_termination_conditions(self):
-        return {
-            "timeout": Timeout(max_steps=self._termination_config["max_steps"]),
-            "max_collision": _MaxCollisionFiltered(
-                task_ref=self,max_collisions=self._termination_config["max_collisions"]
-            ),
-            "falling": Falling(
-            robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]
-        )
-        }
+        return {"timeout": Timeout(max_steps=self._termination_config["max_steps"])}
 
     def _create_reward_functions(self):
+        return {}
+
+    @classproperty
+    def default_termination_config(cls):
+        return {"max_steps": 3000}
+
+    @classproperty
+    def default_reward_config(cls):
         return {}
 
     def reset(self, env):
@@ -394,15 +390,3 @@ class SufficientlyClosedTask(SufficientlyOpenTask):
         done_out = any(d.get("done", False) for d in tc.values())
 
         return dense, done_out, info
-
-    @classproperty
-    def default_termination_config(cls):
-        return {
-            "max_collisions": 1,
-            "max_steps": 500,
-            "fall_height": 0.03,
-        }
-
-    @classproperty
-    def default_reward_config(cls):
-        return {}
