@@ -608,7 +608,6 @@ def astar(search_map, start, goal, eight_connected=True):
 
     while open_set:
         _, current = heapq.heappop(open_set)
-
         visited.add(current)
 
         if current == goal:

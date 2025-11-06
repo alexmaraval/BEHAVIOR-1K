@@ -617,7 +617,6 @@ class TaskEnv:
             )
         if terminated_ep:
             print(f"Subtask {self._stage_idx} terminated.\n{info_out['subtask']}", flush=True)
-
         self._write_video(obs, done=terminated_ep)
 
         return obs, reward_env, terminated_ep, truncated_env, info_out
@@ -1056,7 +1055,7 @@ class TaskIKEnv(TaskEnv):
 
         self._write_video(obs, done=terminated_ep)
 
-        return obs, reward_env, terminated_env, truncated_env, info_out
+        return obs, reward_env, terminated_ep, truncated_env, info_out
 
     def reset(self):
         self._env.robots[0].reset()
