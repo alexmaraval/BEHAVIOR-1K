@@ -553,11 +553,12 @@ class TaskEnv:
 
         sub_task_terminated = False
         combo_done = False
+        _new_stage_idx = self._stage_idx
         if self.task_combo is not None and self.subtasks:
             rew_s, combo_done, info_s = self.task_combo.step(env=self._env, action=action)
             info_s = info_s or {}
             success = bool(info_s["done"]["success"])
-            self._stage_idx = min(self.task_combo.current_index, len(self.subtasks) - 1)
+            _new_stage_idx = min(self.task_combo.current_index, len(self.subtasks) - 1)
             name = None
             if self._stage_idx < len(self.subtasks):
                 name = self._task_stages[self._stage_idx]["name"]
@@ -622,6 +623,8 @@ class TaskEnv:
             print(f"Subtask {self._stage_idx} terminated.\n{info_out['subtask']}", flush=True)
 
         self._write_video(obs, done=terminated_ep)
+
+        self._stage_idx = _new_stage_idx
 
         return obs, reward_env, terminated_ep, truncated_env, info_out
 
@@ -846,7 +849,6 @@ def mask_other_actions(r, unmasked_action_type='base'):
         if unmasked_action_type in slice_key:
             a[action_idx] = 1.0
     return a
-
 
 def build_upper_body_hold_action(r, use_reset_pose=True):
     a = torch.zeros(r.action_dim, dtype=torch.float32)
@@ -1125,12 +1127,10 @@ if __name__ == "__main__":
                 sub_task_info = info["subtask"]
                 idx = sub_task_info["index"]
                 next_idx = idx + 1
-                has_next_stage = idx < len(stage_states)
+                has_next_stage = next_idx < len(stage_states)
 
                 # Update stage info
                 if sub_task_info["done"]:
-                    next_idx = idx
-                    idx = idx - 1
                     stage_states[idx]["status"] = "completed"
                 elif any(sub_task_info.get(k, False) for k in ("falling", "max_collision", "timeout")):
                     console.print("[red]Sub task terminated due to collision/falling/timeout")

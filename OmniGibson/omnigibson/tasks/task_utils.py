@@ -5,6 +5,7 @@ from omnigibson.object_states.contact_bodies import ContactBodies
 from omnigibson.reward_functions.collision_reward import CollisionReward
 from omnigibson.reward_functions.reward_function_base import BaseRewardFunction
 from omnigibson.object_states import Pose
+from omnigibson.controllers import IsGraspingState
 
 def _get_named(env, name):
     return env.scene.object_registry("name", name)
@@ -42,6 +43,16 @@ def get_collided_objects(env, in_contact_objects):
         if obj is not None:
             collided.add(obj.name)
     return collided
+
+def get_free_robot_arms(robot, object):
+    free_arms = []
+    for arm in getattr(robot, "arm_names", [robot.default_arm]):
+        state = robot.is_grasping(arm=arm, candidate_obj=object)
+        if state != IsGraspingState.TRUE:
+            free_arms.append(arm)
+
+    return free_arms
+
 
 class _MaxCollisionFiltered(MaxCollision):
     def __init__(self, task_ref, **kwargs):
