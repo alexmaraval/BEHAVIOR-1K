@@ -275,5 +275,5 @@ class BaseNavigationTask(BaseTask):
             "r_potential": 1.0,
             "r_collision": 0.1,
             "r_pointgoal": 10.0,
-            "r_orientation": 10,
+            "r_orientation": 1,
         }
