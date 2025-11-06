@@ -68,9 +68,6 @@ class BaseNavigationTask(BaseTask):
         assert_valid_key(key=reward_type, valid_keys=POINT_NAVIGATION_REWARD_TYPES, name="reward type")
         self._reward_type = reward_type
 
-        # Collision-skip support: store names and resolved objects
-        self._skip_collision_with_objs_names = skip_collision_with_objs
-
         # Create other attributes that will be filled in at runtime
         self._path_length = None
         self._current_robot_pos = None
@@ -78,6 +75,9 @@ class BaseNavigationTask(BaseTask):
 
         # Run super
         super().__init__(termination_config=termination_config, reward_config=reward_config)
+
+        # Collision-skip support: store names and resolved objects
+        self._skip_collision_with_objs_names = skip_collision_with_objs
 
     def _create_termination_conditions(self):
         # Initialize termination conditions dict and fill in with MaxCollision, Timeout, Falling, and PointGoal
@@ -110,10 +110,10 @@ class BaseNavigationTask(BaseTask):
         rewards["collision"] = _CollisionRewardFiltered(
             self, robot_idn=self._robot_idn, r_collision=self._reward_config["r_collision"]
         )
-        # rewards["pointgoal"] = PointGoalReward(
-        #     pointgoal=self._termination_conditions["pointgoal"],
-        #     r_pointgoal=self._reward_config["r_pointgoal"],
-        # )
+        rewards["pointgoal"] = PointGoalReward(
+            pointgoal=self._termination_conditions["pointgoal"],
+            r_pointgoal=self._reward_config["r_pointgoal"],
+        )
 
         return rewards
 
@@ -252,7 +252,7 @@ class BaseNavigationTask(BaseTask):
         # Orientation error
         if done and info["done"]["success"]:
             heading_error = get_orientation_error(robot=env.robots[self._robot_idn], goal_pos=self.get_goal_pos())
-            orientation_error = -self._reward_config["r_orientation"] * heading_error
+            orientation_error = -self._reward_config["r_orientation"] *  heading_error
             info['reward']["reward_breakdown"]["orientation_error"] = float(orientation_error.item())
         return reward, done, info
 
@@ -274,6 +274,6 @@ class BaseNavigationTask(BaseTask):
         return {
             "r_potential": 1.0,
             "r_collision": 10.0,
-            # "r_pointgoal": 50.0,
-            "r_orientation": 1,
+            "r_pointgoal": 10.0,
+            "r_orientation": 10.0,
         }

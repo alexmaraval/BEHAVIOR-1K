@@ -43,24 +43,24 @@ controllers:
     name: JointController
     motor_type: position
     pos_kp: 150
-    command_input_limits: default # null
-    command_output_limits: default # null
+    command_input_limits: null
+    command_output_limits: null
     use_impedances: false
     use_delta_commands: false
   arm_left:
     name: JointController
     motor_type: position
     pos_kp: 150
-    command_input_limits: default # null
-    command_output_limits: default # null
+    command_input_limits: null
+    command_output_limits: null
     use_impedances: false
     use_delta_commands: false
   arm_right:
     name: JointController
     motor_type: position
     pos_kp: 150
-    command_input_limits: default # null
-    command_output_limits: default # null
+    command_input_limits: null
+    command_output_limits: null
     use_impedances: false
     use_delta_commands: false
   gripper_left:
