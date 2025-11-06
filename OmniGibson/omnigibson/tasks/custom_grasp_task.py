@@ -97,7 +97,7 @@ class _SimpleGraspReward(BaseRewardFunction):
 
         ori_dist = th.acos((th.trace(transformation_target[:3, :3].T @ rotation_matrix_eef) - 1) / 2)
 
-        return -float(pos_dist) * self._dist_coeff + -float(ori_dist) * self._ori_coeff
+        return float(pos_dist) * self._dist_coeff + float(ori_dist) * self._ori_coeff
 
     def _step(self, task, env, action):
         # Reward is proportional to the potential difference between the current and previous timestep
