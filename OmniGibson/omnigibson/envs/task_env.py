@@ -160,13 +160,11 @@ class TaskCombination:
         if self.sparse_early_sub_goals and (self.current_index < len(self.tasks) - 1):
             reward = 0.0
         if done:
-            falling = info['done']['termination_conditions']['falling']['done'] if 'falling' in info['done'][
-                'termination_conditions'] else False
-            max_collision = info['done']['termination_conditions']['max_collision']['done'] if 'max_collision' in \
-                                                                                               info['done'][
-                                                                                                   'termination_conditions'] else False
-            if info["done"]["success"] and not falling and not max_collision:
-                self.current_index += 1
+            falling = info['done']['termination_conditions']['falling']['done'] if 'falling' in info['done']['termination_conditions'] else False
+            max_collision = info['done']['termination_conditions']['max_collision']['done'] if 'max_collision' in info['done']['termination_conditions'] else False
+            timeout = info['done']['termination_conditions']['timeout']['done'] if 'timeout' in info['done']['termination_conditions'] else False
+            self.current_index += 1
+            if info["done"]["success"] and not falling and not max_collision and not timeout:
                 return self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
             else:
                 return -self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
@@ -220,7 +218,6 @@ class TaskEnv:
         self.subtasks = []
         self._task_stages = None
         self.task_combo: TaskCombination | None = None
-        self.active_subtask = 0
 
         self._subtask = None
         self._stage_idx = 0
@@ -614,7 +611,7 @@ class TaskEnv:
                 flush=True,
             )
         if terminated_ep:
-            print(f"Subtask {self.active_subtask} terminated.\n{info_out['subtask']}", flush=True)
+            print(f"Subtask {self._stage_idx} terminated.\n{info_out['subtask']}", flush=True)
 
         self._write_video(obs, done=terminated_ep)
 
@@ -694,7 +691,7 @@ class TaskEnv:
                 cam_pose = T.mat2pose(th.tensor(np.linalg.inv(np.reshape(direct_cam_pose, [4, 4]).T), dtype=th.float32))
                 cam_rel_poses.append(th.cat(T.relative_pose_transform(*cam_pose, *base_pose)))
         obs["robot_r1::cam_rel_poses"] = th.cat(cam_rel_poses, axis=-1)
-        if self.cfg.robot.controllers.get("use_preprocessing", True):
+        if self.cfg.robot.controllers.get("use_proprio_preprocessing", True):
             obs["robot_r1::proprio"] = self._preprocess_proprio(obs["robot_r1::proprio"])
         for k in obs:
             if "rgb" in k:
@@ -1111,9 +1108,9 @@ if __name__ == "__main__":
                 yaw2d = obs["robot_r1::proprio"][149]
                 action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
 
-                action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
-                    action, hold_action_var, hold_action_mask
-                )
+                # action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
+                #     action, hold_action_var, hold_action_mask
+                # )
 
                 obs, reward_env, terminated_env, truncated_env, info = env.step(action)
                 sub_task_info = info["subtask"]

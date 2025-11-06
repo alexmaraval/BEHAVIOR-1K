@@ -68,9 +68,6 @@ class BaseNavigationTask(BaseTask):
         assert_valid_key(key=reward_type, valid_keys=POINT_NAVIGATION_REWARD_TYPES, name="reward type")
         self._reward_type = reward_type
 
-        # Collision-skip support: store names and resolved objects
-        self._skip_collision_with_objs_names = skip_collision_with_objs
-
         # Create other attributes that will be filled in at runtime
         self._path_length = None
         self._current_robot_pos = None
@@ -78,6 +75,9 @@ class BaseNavigationTask(BaseTask):
 
         # Run super
         super().__init__(termination_config=termination_config, reward_config=reward_config)
+
+        # Collision-skip support: store names and resolved objects
+        self._skip_collision_with_objs_names = skip_collision_with_objs
 
     def _create_termination_conditions(self):
         # Initialize termination conditions dict and fill in with MaxCollision, Timeout, Falling, and PointGoal

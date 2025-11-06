@@ -24,9 +24,10 @@ def get_sub_tasks(task_name: str, subtask_index: int | None = None) -> list[dict
 name_radio = "radio_89"
 name_coffe_table = "coffee_table_koagbh_0"
 radio_handle_transform = np.array(
-    [[0.25, 0.43, 0.042],
-     [0.41, 0.68, 0.067],
-     [0.050, 0.084, 0.0083]]
+    [[0.264989, -0.961372, 0.074469, -0.400946],
+     [-0.952157, -0.248690 , 0.177626, -0.310255],
+     [-0.152245, -0.117975, -0.981276, 0.133106],
+     [0.0,0.0,0.0,1.0]]
 )
 
 tr_move_to_radio = partial(
@@ -47,6 +48,7 @@ tr_grasp_radio = partial(
 tr_radio_on = partial(
     OnTask,
     target_object_name=name_radio,
+    skip_collision_with_objs=[name_radio]
 )
 
 stages = [

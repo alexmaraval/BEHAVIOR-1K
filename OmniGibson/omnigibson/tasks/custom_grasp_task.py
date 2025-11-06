@@ -1,15 +1,14 @@
-import math
+import omnigibson.utils.transform_utils as T
 import torch as th
 from omnigibson.object_states import AttachedTo
 from omnigibson.object_states.robot_related_states import IsGrasping
 from omnigibson.reward_functions.reward_function_base import BaseRewardFunction
 from omnigibson.tasks.custom_task_base import BaseTask
+from omnigibson.tasks.task_utils import _MaxCollisionFiltered, SuccessBonusReward
 from omnigibson.termination_conditions.falling import Falling, ObjectFalling
 from omnigibson.termination_conditions.termination_condition_base import SuccessCondition
 from omnigibson.termination_conditions.timeout import Timeout
-from omnigibson.utils.motion_planning_utils import detect_robot_collision_in_sim
 from omnigibson.utils.python_utils import classproperty
-from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _CollisionRewardFiltered, _get_named, _front_target
 
 
 class _GraspSuccess(SuccessCondition):
@@ -48,21 +47,22 @@ class _SimpleGraspReward(BaseRewardFunction):
     def __init__(
             self, obj_name: str,
             dist_coeff: float = 0.001,
-            r_grasp: float = 1.0,
-            collision_penalty: float = 1.0,
+            ori_coeff: float = 0.001,
             transform_matrix=None
     ):
         self._obj_name = obj_name
         self._dist_coeff = dist_coeff
-        self._r_grasp = r_grasp
-        self._collision_penalty = collision_penalty
+        self._ori_coeff = ori_coeff
         self.transform_matrix = transform_matrix
-        self._initial_dist = None
+        self._potential = None
         super().__init__()
 
-    def _eef_pos(self, env):
+    def _eef_position_orientation(self, env):
         robot = env.robots[0]
-        return th.as_tensor(robot.get_eef_position(robot.default_arm), dtype=th.float32)
+        pos = th.as_tensor(robot.get_eef_position(robot.default_arm), dtype=th.float32)
+        orientation = th.as_tensor(robot.get_eef_orientation(robot.default_arm), dtype=th.float32)
+
+        return pos, orientation
 
     def _is_grasping(self, robot, obj) -> bool:
         if IsGrasping in robot.states and robot.states[IsGrasping].get_value(obj):
@@ -74,55 +74,39 @@ class _SimpleGraspReward(BaseRewardFunction):
         return False
 
     def reset(self, task, env):
-        self._initial_dist = None
+        self._potential = self._potential_fcn(env)
+
+    def _potential_fcn(self, env):
+        eef_pos, eef_orientation = self._eef_position_orientation(env)
+
+        obj = env.scene.object_registry("name", self._obj_name)
+        goal_pos, goal_orientation = obj.get_position_orientation()
+
+        # Find EEF transformation
+        rotation_matrix_eef = T.quat2mat(eef_orientation)
+
+        # Find Object transformation
+        transform_object = th.eye(4)
+        transform_object[:3, :3] = T.quat2mat(eef_orientation)
+        transform_object[:3, 3] = goal_pos
+
+        transformation_target = transform_object @ self.transform_matrix
+        pos_dist = T.l2_distance(transformation_target[:3, 3], eef_pos)
+        transformation_target = th.as_tensor(transformation_target, dtype=th.float32)
+        rotation_matrix_eef = th.as_tensor(rotation_matrix_eef, dtype=th.float32)
+
+        ori_dist = th.acos((th.trace(transformation_target[:3, :3].T @ rotation_matrix_eef) - 1) / 2)
+
+        return -float(pos_dist) * self._dist_coeff + -float(ori_dist) * self._ori_coeff
 
     def _step(self, task, env, action):
-        obj = env.scene.object_registry("name", self._obj_name)
-        robot = env.robots[0]
-        max_steps = getattr(env, "max_episode_steps", 100)
-        max_shaping_per_step = self._dist_coeff
+        # Reward is proportional to the potential difference between the current and previous timestep
+        new_potential = self._potential_fcn(env)
+        reward = self._potential - new_potential
 
-        if obj is None:
-            # Still penalize collisions even if object is missing
-            coll = detect_robot_collision_in_sim(robot)
-            pen = (-self._collision_penalty) if coll else 0.0
-            return pen, {
-                "grasp_success": False,
-                "missing_object": True,
-                "collision": bool(coll),
-                "collision_penalty": pen,
-            }
-
-        eef = self._eef_pos(env)
-        goal_pos = th.as_tensor(obj.get_position_orientation()[0], dtype=th.float32)
-
-        if self._initial_dist is None:
-            self._initial_dist = th.norm(self._eef_pos(env) - goal_pos)
-
-        if self.transform_matrix is not None:
-            goal_pos = th.from_numpy(self.transform_matrix).float() @ goal_pos
-
-        grasping = self._is_grasping(robot, obj)
-        if grasping:
-            robot = env.robots[0]
-            coll = detect_robot_collision_in_sim(robot, filter_objs=[obj])
-            pen = (-self._collision_penalty) if coll else 0.0
-            return self._r_grasp + pen, {"grasp_success": True, "collision": bool(coll), "collision_penalty": pen}
-
-        dist = th.norm(eef - goal_pos)
-        shaped = math.exp(-float(dist)) * self._dist_coeff
-        shaped = shaped * (self._r_grasp / (max_steps * max_shaping_per_step))
-        robot = env.robots[0]
-        floors = list(env.scene.object_registry("category", "floors", []))
-        coll = detect_robot_collision_in_sim(robot, filter_objs=[obj] + floors)
-        pen = (-self._collision_penalty) if coll else 0.0
-        return shaped + pen, {
-            "grasp_success": False,
-            "dist": float(dist),
-            "shaping": shaped,
-            "collision": bool(coll),
-            "collision_penalty": pen,
-        }
+        # Update internal potential
+        self._potential = new_potential
+        return reward, {}
 
 
 class RobustGraspTask(BaseTask):
@@ -145,29 +129,34 @@ class RobustGraspTask(BaseTask):
         self._obj_name = obj_name
         self._robot_idn = int(robot_idn)
         self.transform_matrix = transform_matrix
-        self._skip_collision_with_objs_names = skip_collision_with_objs
         super().__init__(termination_config=termination_config, reward_config=reward_config)
+
+        self._skip_collision_with_objs_names = skip_collision_with_objs
 
     def _create_termination_conditions(self):
         return {
             "timeout": Timeout(max_steps=self._termination_config["max_steps"]),
             "graspgoal": _GraspSuccess(obj_name=self._obj_name),
             "falling": Falling(robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]),
-            "object_falling": ObjectFalling(obj_name=self._obj_name, fall_height=self._termination_config["fall_height"]),
-            "max_collision": _MaxCollisionFiltered(task_ref=self, max_collisions=self._termination_config["max_collisions"])
+            "object_falling": ObjectFalling(obj_name=self._obj_name,
+                                            fall_height=self._termination_config["fall_height"]),
+            "max_collision": _MaxCollisionFiltered(task_ref=self,
+                                                   max_collisions=self._termination_config["max_collisions"])
         }
 
     def _create_reward_functions(self):
         cfg = self._reward_config
-        return {
-            "grasp": _SimpleGraspReward(
+        rewards = dict()
+        rewards["potential"] = _SimpleGraspReward(
                 obj_name=self._obj_name,
                 dist_coeff=cfg["dist_coeff"],
-                r_grasp=cfg["r_grasp"],
-                collision_penalty=cfg["collision_penalty"],
+                ori_coeff=cfg["ori_coeff"],
                 transform_matrix=self.transform_matrix,
             )
-        }
+        rewards["graspgoal"] = SuccessBonusReward(
+            success_condition=self._termination_conditions["graspgoal"], r_success=cfg["r_grasp"]
+        )
+        return rewards
 
     def reset(self, env):
         # Release any existing grasps and reset reward/terminations
@@ -187,4 +176,4 @@ class RobustGraspTask(BaseTask):
 
     @classproperty
     def default_reward_config(cls):
-        return {"dist_coeff": 0.001, "r_grasp": 1.0, "collision_penalty": 1.0}
+        return {"dist_coeff": 0.001, "r_grasp": 10.0, "ori_coeff": 0.0005}

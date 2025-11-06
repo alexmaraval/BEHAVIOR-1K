@@ -19,6 +19,7 @@ class _PredicateToggleTask(BaseTask):
             desired_value: bool,
             termination_config=None,
             reward_config=None,
+            skip_collision_with_objs=None,
     ):
         self._target_object_name = target_object_name
         self._pred = desired_predicate.lower()
@@ -28,6 +29,8 @@ class _PredicateToggleTask(BaseTask):
         term_cfg.setdefault("max_steps", 4000)
 
         super().__init__(termination_config=term_cfg, reward_config=reward_config)
+
+        self._skip_collision_with_objs_names = skip_collision_with_objs
 
     def _create_termination_conditions(self):
         terminations = dict()
