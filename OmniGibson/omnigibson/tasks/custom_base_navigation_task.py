@@ -110,10 +110,10 @@ class BaseNavigationTask(BaseTask):
         rewards["collision"] = _CollisionRewardFiltered(
             self, robot_idn=self._robot_idn, r_collision=self._reward_config["r_collision"]
         )
-        # rewards["pointgoal"] = PointGoalReward(
-        #     pointgoal=self._termination_conditions["pointgoal"],
-        #     r_pointgoal=self._reward_config["r_pointgoal"],
-        # )
+        rewards["pointgoal"] = PointGoalReward(
+            pointgoal=self._termination_conditions["pointgoal"],
+            r_pointgoal=self._reward_config["r_pointgoal"],
+        )
 
         return rewards
 
@@ -252,7 +252,7 @@ class BaseNavigationTask(BaseTask):
         # Orientation error
         if done and info["done"]["success"]:
             heading_error = get_orientation_error(robot=env.robots[self._robot_idn], goal_pos=self.get_goal_pos())
-            orientation_error = -self._reward_config["r_orientation"] * heading_error
+            orientation_error = self._reward_config["r_orientation"] -  heading_error
             info['reward']["reward_breakdown"]["orientation_error"] = float(orientation_error.item())
         return reward, done, info
 
@@ -274,6 +274,6 @@ class BaseNavigationTask(BaseTask):
         return {
             "r_potential": 1.0,
             "r_collision": 0.1,
-            # "r_pointgoal": 10.0,
-            "r_orientation": 1,
+            "r_pointgoal": 10.0,
+            "r_orientation": 10,
         }

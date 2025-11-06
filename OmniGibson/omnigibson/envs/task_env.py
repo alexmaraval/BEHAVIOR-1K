@@ -159,17 +159,25 @@ class TaskCombination:
         # Sparse early subtasks if requested
         if self.sparse_early_sub_goals and (self.current_index < len(self.tasks) - 1):
             reward = 0.0
-        if done:
-            falling = info['done']['termination_conditions']['falling']['done'] if 'falling' in info['done']['termination_conditions'] else False
-            max_collision = info['done']['termination_conditions']['max_collision']['done'] if 'max_collision' in info['done']['termination_conditions'] else False
-            timeout = info['done']['termination_conditions']['timeout']['done'] if 'timeout' in info['done']['termination_conditions'] else False
-            self.current_index += 1
-            if info["done"]["success"] and not falling and not max_collision and not timeout:
-                return self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
-            else:
-                return -self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
 
-        return float(reward), False, info
+        if not done:
+            return float(reward), False, info
+
+        term = info.get('done', {}).get('termination_conditions', {})
+        falling = term.get('falling', {}).get('done', False)
+        collision = term.get('max_collision', {}).get('done', False)
+        timeout = term.get('timeout', {}).get('done', False)
+
+        self.current_index += 1
+        all_tasks_done = (self.current_index >= len(self.tasks))
+        task_success = info.get("done", {}).get("success", False)
+        valid_completion = task_success and not (falling or collision or timeout)
+
+        if valid_completion:
+            orientation_reward = info.get("reward", {}).get("reward_breakdown", {}).get("orientation_error", 0)
+            return orientation_reward + self.bonus_completed_subtask, all_tasks_done, info
+
+        return -self.bonus_completed_subtask, all_tasks_done, info
 
 
 class TaskEnv:
@@ -839,6 +847,7 @@ def mask_other_actions(r, unmasked_action_type='base'):
             a[action_idx] = 1.0
     return a
 
+
 def build_upper_body_hold_action(r, use_reset_pose=True):
     a = torch.zeros(r.action_dim, dtype=torch.float32)
     idx = r.controller_action_idx
@@ -1121,7 +1130,7 @@ if __name__ == "__main__":
                 # Update stage info
                 if sub_task_info["done"]:
                     next_idx = idx
-                    idx = idx -1
+                    idx = idx - 1
                     stage_states[idx]["status"] = "completed"
                 elif any(sub_task_info.get(k, False) for k in ("falling", "max_collision", "timeout")):
                     console.print("[red]Sub task terminated due to collision/falling/timeout")

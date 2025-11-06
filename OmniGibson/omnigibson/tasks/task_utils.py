@@ -29,8 +29,9 @@ def get_orientation_error(robot, goal_pos):
     diff = desired_yaw - yaw
     diff_wrapped = (diff + pi) % two_pi - pi
     heading_error = th.abs(diff_wrapped)
+    heading_error_nor = heading_error / pi
 
-    return heading_error
+    return heading_error_nor
 
 def get_collided_objects(env, in_contact_objects):
     collided = set()
