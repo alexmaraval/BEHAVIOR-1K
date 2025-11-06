@@ -1,14 +1,41 @@
+import torch as th
 from omnigibson.object_states.inside import Inside
 from omnigibson.object_states.next_to import NextTo
 from omnigibson.object_states.on_top import OnTop
 from omnigibson.object_states.open_state import Open
 from omnigibson.object_states.robot_related_states import IsGrasping
 from omnigibson.object_states.toggle import ToggledOn
+from omnigibson.reward_functions.potential_reward import PotentialReward
 from omnigibson.tasks.custom_task_base import BaseTask
-from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _get_named
+from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _get_named, SuccessBonusReward, get_free_robot_arms
 from omnigibson.termination_conditions.falling import Falling, ObjectFalling
+from omnigibson.termination_conditions.termination_condition_base import SuccessCondition
 from omnigibson.termination_conditions.timeout import Timeout
 from omnigibson.utils.python_utils import classproperty
+
+
+class _PredicateSatisfied(SuccessCondition):
+    """Success when target object's predicate equals the desired value."""
+
+    def __init__(self, obj_name: str, predicate: str, desired_value: bool):
+        self._obj_name = obj_name
+        self._pred = predicate.lower()
+        self._val = bool(desired_value)
+        super().__init__()
+
+    def _get_state(self, obj):
+        if self._pred == "on" and ToggledOn in obj.states:
+            return obj.states[ToggledOn].get_value()
+        if self._pred == "open" and Open in obj.states:
+            return obj.states[Open].get_value()
+        return None
+
+    def _step(self, task, env, action):
+        obj = _get_named(env, self._obj_name)
+        if obj is None:
+            return False
+        cur = self._get_state(obj)
+        return cur == self._val
 
 
 class _PredicateToggleTask(BaseTask):
@@ -20,10 +47,12 @@ class _PredicateToggleTask(BaseTask):
             termination_config=None,
             reward_config=None,
             skip_collision_with_objs=None,
+            consider_free_arms_only=False,
     ):
         self._target_object_name = target_object_name
         self._pred = desired_predicate.lower()
         self._val = bool(desired_value)
+        self.consider_free_arms_only = consider_free_arms_only
 
         term_cfg = dict(termination_config or {})
         term_cfg.setdefault("max_steps", 4000)
@@ -42,14 +71,45 @@ class _PredicateToggleTask(BaseTask):
         terminations["falling"] = Falling(
             robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]
         )
-        terminations["object_falling"] = ObjectFalling(obj_name=self._target_object_name,
-                                                       fall_height=self._termination_config["fall_height"])
-
+        terminations["object_falling"] = ObjectFalling(
+            obj_name=self._target_object_name,
+            fall_height=self._termination_config["fall_height"],
+        )
+        terminations["predicate"] = _PredicateSatisfied(
+            obj_name=self._target_object_name, predicate=self._pred, desired_value=self._val
+        )
 
         return terminations
 
+    def potential_fcn(self, env):
+        obj = _get_named(env, self._target_object_name)
+        if obj is not None:
+            obj_pos, _ = obj.get_position_orientation()
+            obj_pos = th.as_tensor(obj_pos, dtype=th.float32)
+
+            free_arms = get_free_robot_arms(env.robots[self._robot_idn], obj, self.consider_free_arms_only)
+
+            min_dist = None
+            for arm in free_arms:
+                eef = th.as_tensor(env.robots[self._robot_idn].get_eef_position(arm=arm), dtype=th.float32)
+                val = float(th.norm(eef - obj_pos))
+                min_dist = val if min_dist is None else min(min_dist, val)
+            return min_dist
+
+        return th.tensor(0.0)
+
     def _create_reward_functions(self):
-        return {}
+        rewards = dict()
+        rewards["potential"] = PotentialReward(
+            potential_fcn=lambda env: float(self.potential_fcn(env)),
+            r_potential=self._reward_config.get("r_potential", 1.0),
+        )
+
+        rewards["success_bonus"] = SuccessBonusReward(
+            success_condition=self._termination_conditions["predicate"],
+            r_success=self._reward_config.get("r_success", 1.0),
+        )
+        return rewards
 
     def reset(self, env):
         super().reset(env)
@@ -62,36 +122,7 @@ class _PredicateToggleTask(BaseTask):
         return None
 
     def step(self, env, action):
-        info = {"done": {"success": False, "termination_conditions": dict()}}
-        obj = _get_named(env, self._target_object_name)
-        if obj is None:
-            info["done"]["termination_conditions"] = {"object_not_found": {"done": True}}
-            return 0.0, True, info
-
-        cur = self._get_state(obj)
-
-        if cur == self._val:
-            info["done"]["success"] = True
-            info["done"]["termination_conditions"] = {"predicate": {"done": True}}
-            return 1.0, True, info
-
-        # Not yet successful: allow global timeout
-        base_done, base_info = super()._step_termination(
-            env=env,
-            action=action,
-            info={"done": {"success": False, "termination_conditions": {}}},
-        )
-        tc = dict(base_info.get("done", {}).get("termination_conditions", {}))
-        for k, v in list(tc.items()):
-            if not isinstance(v, dict):
-                tc[k] = {"done": bool(v)}
-        if base_done and not any(d.get("done", False) for d in tc.values()):
-            tc.setdefault("timeout", {"done": True})
-        info["done"]["termination_conditions"] = tc
-        done_out = any(d.get("done", False) for d in tc.values())
-
-        reward = self._reward_config.get("r_offset", 0.0)
-        return reward, done_out, info
+        return super().step(env, action)
 
     @classproperty
     def default_termination_config(cls):
@@ -103,11 +134,22 @@ class _PredicateToggleTask(BaseTask):
 
     @classproperty
     def default_reward_config(cls):
-        return {}
+        return {
+            "r_offset": 0.0,
+            "r_potential": 1.0,
+            "r_success": 1.0,
+        }
+
 
 class OnTask(_PredicateToggleTask):
     def __init__(self, target_object_name: str, **kwargs):
-        super().__init__(target_object_name=target_object_name, desired_predicate="on", desired_value=True, **kwargs)
+        super().__init__(
+            target_object_name=target_object_name,
+            desired_predicate="on",
+            desired_value=True,
+            consider_free_arms_only= True,
+            **kwargs
+        )
 
 
 class OpenTask(_PredicateToggleTask):

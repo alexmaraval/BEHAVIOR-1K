@@ -44,11 +44,11 @@ def get_collided_objects(env, in_contact_objects):
             collided.add(obj.name)
     return collided
 
-def get_free_robot_arms(robot, object):
+def get_free_robot_arms(robot, object, consider_free_arms_only ):
     free_arms = []
     for arm in getattr(robot, "arm_names", [robot.default_arm]):
         state = robot.is_grasping(arm=arm, candidate_obj=object)
-        if state != IsGraspingState.TRUE:
+        if consider_free_arms_only and state != IsGraspingState.TRUE:
             free_arms.append(arm)
 
     return free_arms
