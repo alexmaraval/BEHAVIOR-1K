@@ -252,7 +252,7 @@ class BaseNavigationTask(BaseTask):
         # Orientation error
         if done and info["done"]["success"]:
             heading_error = get_orientation_error(robot=env.robots[self._robot_idn], goal_pos=self.get_goal_pos())
-            orientation_error = self._reward_config["r_orientation"] -  heading_error
+            orientation_error = -self._reward_config["r_orientation"] *  heading_error
             info['reward']["reward_breakdown"]["orientation_error"] = float(orientation_error.item())
         return reward, done, info
 
