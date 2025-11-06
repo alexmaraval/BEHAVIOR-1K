@@ -5,6 +5,7 @@ from omnigibson.object_states.contact_bodies import ContactBodies
 from omnigibson.reward_functions.collision_reward import CollisionReward
 from omnigibson.reward_functions.reward_function_base import BaseRewardFunction
 from omnigibson.object_states import Pose
+from omnigibson.controllers import IsGraspingState
 
 def _get_named(env, name):
     return env.scene.object_registry("name", name)
@@ -29,8 +30,29 @@ def get_orientation_error(robot, goal_pos):
     diff = desired_yaw - yaw
     diff_wrapped = (diff + pi) % two_pi - pi
     heading_error = th.abs(diff_wrapped)
+    heading_error_nor = heading_error / pi
 
-    return heading_error
+    return heading_error_nor
+
+def get_collided_objects(env, in_contact_objects):
+    collided = set()
+    for rp in in_contact_objects:
+        # Parent prim path is the object prim path
+        obj_prim_path = "/".join(rp.prim_path.split("/")[:-1])
+        obj = env.scene.object_registry("prim_path", obj_prim_path)
+        if obj is not None:
+            collided.add(obj.name)
+    return collided
+
+def get_free_robot_arms(robot, object, consider_free_arms_only ):
+    free_arms = []
+    for arm in getattr(robot, "arm_names", [robot.default_arm]):
+        state = robot.is_grasping(arm=arm, candidate_obj=object)
+        if consider_free_arms_only and state != IsGraspingState.TRUE:
+            free_arms.append(arm)
+
+    return free_arms
+
 
 class _MaxCollisionFiltered(MaxCollision):
     def __init__(self, task_ref, **kwargs):
@@ -43,8 +65,12 @@ class _MaxCollisionFiltered(MaxCollision):
         extra_ignores = self._task_ref.skip_collision_objs
         ignore_objs = floors if self._ignore_self_collisions is None else floors + [robot]
         ignore_objs = tuple(list(ignore_objs) + extra_ignores)
-        in_contact = len(robot.states[ContactBodies].get_value(ignore_objs=ignore_objs)) > 0
+        in_contact_objects = robot.states[ContactBodies].get_value(ignore_objs=ignore_objs)
+        in_contact = len(in_contact_objects) > 0
         self._n_collisions += int(in_contact)
+        collided_names = get_collided_objects(env, in_contact_objects)
+        if collided_names:
+            print(f"Robot collided with {collided_names}")
         return self._n_collisions >= self._max_collisions
 
 
@@ -93,3 +119,15 @@ class OrientationAlignReward(BaseRewardFunction):
         penalty = th.abs(diff_wrapped)
         rew = -self._coef * penalty
         return float(rew.item()), {"heading_error": float(penalty.item())}
+
+class SuccessBonusReward(BaseRewardFunction):
+    def __init__(self, success_condition, r_success=10.0):
+        self._success_condition = success_condition
+        self._r = float(r_success)
+        super().__init__()
+
+    def reset(self, task, env):
+        pass
+
+    def _step(self, task, env, action):
+        return (self._r if self._success_condition.success else 0.0), {}

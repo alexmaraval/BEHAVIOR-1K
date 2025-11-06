@@ -2,6 +2,7 @@ import json
 import os
 import random
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -159,17 +160,25 @@ class TaskCombination:
         # Sparse early subtasks if requested
         if self.sparse_early_sub_goals and (self.current_index < len(self.tasks) - 1):
             reward = 0.0
-        if done:
-            falling = info['done']['termination_conditions'].get('falling', False)['done']
-            max_collision = info['done']['termination_conditions'].get('max_collision', False)['done']
-            timeout = info['done']['termination_conditions'].get('timeout', False)['done']
-            if info["done"]["success"] and not falling and not max_collision and not timeout:
-                self.current_index += 1
-                return self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
-            else:
-                return -self.bonus_completed_subtask, (self.current_index >= len(self.tasks)), info
 
-        return float(reward), False, info
+        if not done:
+            return float(reward), False, info
+
+        term = info.get('done', {}).get('termination_conditions', {})
+        falling = term.get('falling', {}).get('done', False)
+        collision = term.get('max_collision', {}).get('done', False)
+        timeout = term.get('timeout', {}).get('done', False)
+
+        self.current_index += 1
+        all_tasks_done = (self.current_index >= len(self.tasks))
+        task_success = info.get("done", {}).get("success", False)
+        valid_completion = task_success and not (falling or collision or timeout)
+
+        if valid_completion:
+            orientation_reward = info.get("reward", {}).get("reward_breakdown", {}).get("orientation_error", 0)
+            return orientation_reward + self.bonus_completed_subtask, all_tasks_done, info
+        else:
+            return -self.bonus_completed_subtask, all_tasks_done, info
 
 
 class TaskEnv:
@@ -399,11 +408,22 @@ class TaskEnv:
         Returns:
              The initial observation from the environment after reset.
         """
+        _start = time.time()
         self._env.robots[0].reset()
+        reset_robot_time = time.time() - _start
+        _start = time.time()
         obs, info = self._env.reset()
+        reset_env_time = time.time() - _start
+        _start = time.time()
         self.load_task_instance()
-
+        load_task_instance_time = time.time() - _start
         self.frames = None
+
+        print("*" * 100, flush=True)
+        print(f"[TaskEnv][reset()] Reset robot: {reset_robot_time}", flush=True)
+        print(f"[TaskEnv][reset()] Reset env: {reset_env_time}", flush=True)
+        print(f"[TaskEnv][reset()] Reset task: {load_task_instance_time}", flush=True)
+        print("*" * 100, flush=True)
 
         self.prev_lin_velocity_base = obs["robot_r1"]["proprio"][..., 152:155]
         self.prev_ang_velocity_base = obs["robot_r1"]["proprio"][..., 155:158]
@@ -842,6 +862,7 @@ def mask_other_actions(r, unmasked_action_type='base'):
             a[action_idx] = 1.0
     return a
 
+
 def build_upper_body_hold_action(r, use_reset_pose=True):
     a = torch.zeros(r.action_dim, dtype=torch.float32)
     idx = r.controller_action_idx
@@ -1041,6 +1062,8 @@ class TaskEnvRepeatWrapper(TaskEnv):
             use_domain_randomization: bool = False,
             subtask_index: int | None = None,
             action_repeat: int = 1,
+            action_smoothing: bool = False,
+            action_smoothing_factor: float = 0.9,
     ):
         super().__init__(
             config=config,
@@ -1052,15 +1075,36 @@ class TaskEnvRepeatWrapper(TaskEnv):
         )
         assert action_repeat >= 1, action_repeat
         self.action_repeat = action_repeat
+        self.action_smoothing = action_smoothing
+        self.action_smoothing_factor = action_smoothing_factor
+        self.action_accumulator = None
 
     def step(self, action: th.Tensor) -> tuple[dict, float, bool, bool, dict]:
         reward_env_acc = 0
+        action_tensor = action["robot_r1"]
+        # init action accumulator if needed
+        if self.action_accumulator is None:
+            self.action_accumulator = action_tensor
+        # compute action with momentum if desired
+        if self.action_smoothing:
+            new_action = (1 - self.action_smoothing_factor) * action_tensor
+            old_action = self.action_smoothing_factor * self.action_accumulator
+            action_tensor = new_action + old_action
+        action["robot_r1"] = action_tensor
+        # apply it repeatedly to the env
         for step in range(self.action_repeat):
             obs, reward_env, terminated_ep, truncated_env, info_out = super().step(action)
             reward_env_acc += reward_env
             if terminated_ep or truncated_env:
                 return obs, reward_env_acc, terminated_ep, truncated_env, info_out
-        return obs, reward_env_acc, terminated_ep, truncated_env, info_out
+        else:
+            # update action accumulator
+            self.action_accumulator = action_tensor
+            return obs, reward_env_acc, terminated_ep, truncated_env, info_out
+
+    def reset(self) -> dict[str, ...]:
+        self.action_accumulator = None
+        return super().reset()
 
 
 if __name__ == "__main__":
@@ -1143,20 +1187,18 @@ if __name__ == "__main__":
                 yaw2d = obs["robot_r1::proprio"][149]
                 action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
 
-                action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
-                    action, hold_action_var, hold_action_mask
-                )
+                # action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
+                #     action, hold_action_var, hold_action_mask
+                # )
 
                 obs, reward_env, terminated_env, truncated_env, info = env.step(action)
                 sub_task_info = info["subtask"]
                 idx = sub_task_info["index"]
                 next_idx = idx + 1
-                has_next_stage = idx < len(stage_states)
+                has_next_stage = next_idx < len(stage_states)
 
                 # Update stage info
                 if sub_task_info["done"]:
-                    next_idx = idx
-                    idx = idx -1
                     stage_states[idx]["status"] = "completed"
                 elif any(sub_task_info.get(k, False) for k in ("falling", "max_collision", "timeout")):
                     console.print("[red]Sub task terminated due to collision/falling/timeout")
