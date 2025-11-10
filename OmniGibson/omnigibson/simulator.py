@@ -225,7 +225,7 @@ def _launch_app():
 
     # performance related
     sys.argv.append("--/plugins/omni.tbb.globalcontrol/maxThreadCount=1")
-    sys.argv.append("--/plugins/carb.tasking.plugin/threadCount=2")
+    sys.argv.append("--/plugins/carb.tasking.plugin/threadCount=4")
     sys.argv.append("--/persistent/physics/numThreads=1")
     sys.argv.append("--/renderer/cpu/numThreads=1")
 
