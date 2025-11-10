@@ -14,5 +14,5 @@ class StandUprightReward(BaseRewardFunction):
         R = T.quat2mat(quat)
         up = R[:, 2]        # robot's local +Z in world
         c = torch.clamp(up[2], -1.0, 1.0) # dot(up, world_z) == R[2,2]
-        r = 0.5 * (c + 1.0) * self.coeff
+        r = c * self.coeff
         return float(r.item()), {"upright_cos": float(c.item())}
