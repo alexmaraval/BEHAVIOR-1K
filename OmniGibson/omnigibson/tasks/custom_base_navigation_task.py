@@ -3,6 +3,7 @@ import torch as th
 from omnigibson.object_states import Pose
 from omnigibson.reward_functions.point_goal_reward import PointGoalReward
 from omnigibson.reward_functions.potential_reward import PotentialReward
+from omnigibson.reward_functions.stand_upright_reward import StandUprightReward
 from omnigibson.scenes.traversable_scene import TraversableScene
 from omnigibson.tasks.custom_task_base import BaseTask
 from omnigibson.tasks.task_utils import _MaxCollisionFiltered, _CollisionRewardFiltered, _get_named, _front_target, \
@@ -106,7 +107,9 @@ class BaseNavigationTask(BaseTask):
             potential_fcn=self.get_potential,
             r_potential=self._reward_config["r_potential"],
         )
-
+        rewards["stand_upright"] = StandUprightReward(
+            robot_idn=self._robot_idn, coeff=self._reward_config["r_stand_upright"]
+        )
         rewards["collision"] = _CollisionRewardFiltered(
             self, robot_idn=self._robot_idn, r_collision=self._reward_config["r_collision"]
         )
@@ -276,4 +279,5 @@ class BaseNavigationTask(BaseTask):
             "r_collision": 10.0,
             "r_pointgoal": 10.0,
             "r_orientation": 10.0,
+            "r_stand_upright": 1e-3,
         }

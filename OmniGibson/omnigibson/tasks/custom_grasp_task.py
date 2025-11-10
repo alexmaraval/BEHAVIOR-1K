@@ -3,6 +3,7 @@ import torch as th
 from omnigibson.object_states import AttachedTo
 from omnigibson.object_states.robot_related_states import IsGrasping
 from omnigibson.reward_functions.reward_function_base import BaseRewardFunction
+from omnigibson.reward_functions.stand_upright_reward import StandUprightReward
 from omnigibson.tasks.custom_task_base import BaseTask
 from omnigibson.tasks.task_utils import _MaxCollisionFiltered, SuccessBonusReward
 from omnigibson.termination_conditions.falling import Falling, ObjectFalling
@@ -153,6 +154,9 @@ class RobustGraspTask(BaseTask):
                 ori_coeff=cfg["ori_coeff"],
                 transform_matrix=self.transform_matrix,
             )
+        rewards["stand_upright"] = StandUprightReward(
+            robot_idn=self._robot_idn, coeff=self._reward_config["r_stand_upright"]
+        )
         rewards["graspgoal"] = SuccessBonusReward(
             success_condition=self._termination_conditions["graspgoal"], r_success=cfg["r_grasp"]
         )
@@ -176,4 +180,4 @@ class RobustGraspTask(BaseTask):
 
     @classproperty
     def default_reward_config(cls):
-        return {"dist_coeff": 1.0, "r_grasp": 10.0, "ori_coeff": 0.5}
+        return {"dist_coeff": 10.0, "r_grasp": 10.0, "ori_coeff": 5.0, "r_stand_upright": 1e-3}

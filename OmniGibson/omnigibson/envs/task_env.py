@@ -601,6 +601,7 @@ class TaskEnv:
             subtask_info.update(
                 name=name,
                 reward=float(rew_s),
+                reward_breakdown=info_s["reward"].get("reward_breakdown", {}),
                 done=success or combo_done,
                 success=success,
                 timeout=False if success else timeout,
@@ -634,7 +635,7 @@ class TaskEnv:
         if terminated_ep:
             print(f"Subtask {self._stage_idx} terminated.\n{info_out['subtask']}", flush=True)
 
-        self._write_video(obs, done=terminated_ep)
+        self._write_video(obs, done=terminated_ep, subtask=self._stage_idx)
 
         self._stage_idx = _new_stage_idx
 
@@ -721,7 +722,7 @@ class TaskEnv:
                 obs[k] = self._preprocess_rgb(obs[k])
         return obs
 
-    def _write_video(self, obs, done: bool = False) -> None:
+    def _write_video(self, obs, done: bool = False, subtask: int = 0) -> None:
         """
         Write the current robot observations to video.
         """
@@ -761,7 +762,7 @@ class TaskEnv:
                     print("Warning: done=True but no frames collected — skipping video save")
                     return
                 date_str = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
-                video_name = str(self.video_path) + f"/{self.task_name}_{date_str}.mkv"
+                video_name = str(self.video_path) + f"/subtask_{subtask}_{date_str}.mkv"
                 container, stream = create_video_writer(fpath=video_name, resolution=(448, 1120))
                 try:
                     write_video(
