@@ -1,3 +1,4 @@
+import numpy as np
 import omnigibson.utils.transform_utils as T
 import torch as th
 from omnigibson.object_states import AttachedTo
@@ -82,22 +83,25 @@ class _SimpleGraspReward(BaseRewardFunction):
         obj = env.scene.object_registry("name", self._obj_name)
         goal_pos, goal_orientation = obj.get_position_orientation()
 
-        # Find EEF transformation
-        rotation_matrix_eef = T.quat2mat(eef_orientation)
+        if self.transform_matrix is not None:
+            # Find EEF transformation
+            rotation_matrix_eef = T.quat2mat(eef_orientation)
 
-        # Find Object transformation
-        transform_object = th.eye(4)
-        transform_object[:3, :3] = T.quat2mat(eef_orientation)
-        transform_object[:3, 3] = goal_pos
+            # Find Object transformation
+            transform_object = th.eye(4)
+            transform_object[:3, :3] = T.quat2mat(eef_orientation)
+            transform_object[:3, 3] = goal_pos
 
-        transformation_target = transform_object @ self.transform_matrix
-        pos_dist = T.l2_distance(transformation_target[:3, 3], eef_pos)
-        transformation_target = th.as_tensor(transformation_target, dtype=th.float32)
-        rotation_matrix_eef = th.as_tensor(rotation_matrix_eef, dtype=th.float32)
+            transformation_target = transform_object @ self.transform_matrix
+            pos_dist = T.l2_distance(transformation_target[:3, 3], eef_pos)
+            transformation_target = th.as_tensor(transformation_target, dtype=th.float32)
+            rotation_matrix_eef = th.as_tensor(rotation_matrix_eef, dtype=th.float32)
 
-        ori_dist = th.acos((th.trace(transformation_target[:3, :3].T @ rotation_matrix_eef) - 1) / 2)
+            ori_dist = th.acos((th.trace(transformation_target[:3, :3].T @ rotation_matrix_eef) - 1) / 2)
 
-        return float(pos_dist) * self._dist_coeff + float(ori_dist) * self._ori_coeff
+            return float(pos_dist) * self._dist_coeff + float(ori_dist) * self._ori_coeff
+        else:
+            return float(th.norm(eef_pos - goal_pos) *  self._ori_coeff)
 
     def _step(self, task, env, action):
         # Reward is proportional to the potential difference between the current and previous timestep

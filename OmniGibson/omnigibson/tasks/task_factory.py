@@ -6,7 +6,7 @@ from omnigibson.tasks.custom_grasp_task import RobustGraspTask
 from omnigibson.tasks.custom_open_close_task import SufficientlyClosedTask, SufficientlyOpenTask
 from omnigibson.tasks.custom_point_reaching_task import MoveEEToObjectTask
 from omnigibson.tasks.custom_predicate_task import OnTask
-from omnigibson.tasks.custom_predicate_task import OnTopStableTask, NextToTask, OnTopTask, InsideTask
+from omnigibson.tasks.custom_predicate_task import NextToTask, OnTopTask, InsideTask
 
 max_steps = 5000
 task_factory = {}
@@ -17,7 +17,6 @@ def get_sub_tasks(task_name: str, subtask_index: int | None = None) -> list[dict
         return [task_factory[task_name][subtask_index]]
     else:
         return task_factory[task_name]
-
 
 # -----turning_on_radio-----
 
@@ -60,6 +59,14 @@ stages = [
 task_factory.update({"turning_on_radio": stages})
 
 # -----cook_bacon-----
+
+fridge_handle_transform = np.array(
+    [[1.0, 3.729655e-17, 0.0, 0.807374],
+     [-1.734723e-17, 1.0 , 6.938894e-18, 0.784678],
+     [2.775558e-17, 6.938894e-18, 1.0, 0.257681],
+     [0.0,0.0,0.0,1.0]]
+)
+
 name_fridge = "fridge_dszchb_0"
 name_countertop = "countertop_kelker_0"
 name_pan = "frying_pan_207"
@@ -71,6 +78,10 @@ name_bacon_3 = "bacon_211"
 name_bacon_4 = "bacon_212"
 name_bacon_5 = "bacon_213"
 name_bacon_6 = "bacon_214"
+
+# Extra skip collision objects
+name_bottom_cabinet = "bottom_cabinet_fancyy_0"
+name_oven = "oven_ffitak_0"
 
 cb_move_to_fridge = partial(
     BaseNavigationTask,
@@ -84,6 +95,7 @@ cb_open_fridge = partial(
     target_object_name=name_fridge,
     allowed_deg=80,
     termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[name_fridge, name_bottom_cabinet, name_oven ]
 )
 
 cb_close_fridge = partial(
@@ -91,6 +103,16 @@ cb_close_fridge = partial(
     target_object_name=name_fridge,
     allowed_deg=0,
     termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[
+        name_tray,
+        name_bacon_1,
+        name_bacon_2,
+        name_bacon_3,
+        name_bacon_4,
+        name_bacon_5,
+        name_bacon_6,
+        name_fridge
+    ],
 )
 
 cb_move_to_counter_top = partial(
@@ -106,6 +128,7 @@ cb_move_to_counter_top = partial(
         name_bacon_4,
         name_bacon_5,
         name_bacon_6,
+        name_fridge
     ],
 )
 
@@ -115,6 +138,16 @@ cb_place_next_to_burner = partial(
     source_object_name=name_burner,
     desired_value=True,
     termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[
+            name_tray,
+            name_bacon_1,
+            name_bacon_2,
+            name_bacon_3,
+            name_bacon_4,
+            name_bacon_5,
+            name_bacon_6,
+            name_countertop,
+        ],
 )
 
 cb_move_to_frying_pan = partial(
@@ -122,7 +155,17 @@ cb_move_to_frying_pan = partial(
     target_object_name=name_pan,
     goal_tolerance=0.05,
     termination_config={"max_steps": 10000},
-    skip_collision_with_objs=[name_pan],
+    skip_collision_with_objs=[
+        name_tray,
+        name_bacon_1,
+        name_bacon_2,
+        name_bacon_3,
+        name_bacon_4,
+        name_bacon_5,
+        name_bacon_6,
+        name_pan,
+        name_countertop
+    ],
 )
 
 cb_move_to_tray = partial(
@@ -130,14 +173,16 @@ cb_move_to_tray = partial(
     target_object_name=name_tray,
     goal_tolerance=0.05,
     termination_config={"max_steps": 10000},
-    skip_collision_with_objs=[name_tray],
+    skip_collision_with_objs=[name_tray, name_countertop],
 )
 
 cb_place_frying_pan = partial(
-    OnTopStableTask,
+    OnTopTask,
     target_object_name=name_burner,
     source_object_name=name_pan,
     termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[name_pan],
+    require_release=True
 )
 
 cb_burner_on = partial(
@@ -152,18 +197,39 @@ cb_pour_tray = partial(
     source_object_name=name_pan,
     desired_value=True,
     termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[
+            name_tray,
+            name_bacon_1,
+            name_bacon_2,
+            name_bacon_3,
+            name_bacon_4,
+            name_bacon_5,
+            name_bacon_6,
+        ],
 )
 
 cb_grasp_tray = partial(
     RobustGraspTask,
     obj_name=name_tray,
     termination_config={"max_steps": 10000},
+    skip_collision_with_objs = [
+        name_tray,
+        name_bacon_1,
+        name_bacon_2,
+        name_bacon_3,
+        name_bacon_4,
+        name_bacon_5,
+        name_bacon_6,
+        name_fridge,
+        name_countertop,
+    ],
 )
 
 cb_grasp_pan = partial(
     RobustGraspTask,
     obj_name=name_pan,
     termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[name_pan],
 )
 
 stages = [
@@ -270,17 +336,19 @@ fp_move_to_apple_pie_2 = partial(
 )
 
 fp_place_tupperware_1_countertop = partial(
-    OnTopStableTask,
+    OnTopTask,
     target_object_name=name_countertop,
     source_object_name=name_tupperware_1,
     termination_config={"max_steps": 10000},
+    require_release=True
 )
 
 fp_place_tupperware_2_countertop = partial(
-    OnTopStableTask,
+    OnTopTask,
     target_object_name=name_countertop,
     source_object_name=name_tupperware_2,
     termination_config={"max_steps": 10000},
+    require_release=True
 )
 
 fp_grasp_apple_pie_1 = partial(

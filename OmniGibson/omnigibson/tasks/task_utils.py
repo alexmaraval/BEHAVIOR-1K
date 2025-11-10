@@ -131,3 +131,18 @@ class SuccessBonusReward(BaseRewardFunction):
 
     def _step(self, task, env, action):
         return (self._r if self._success_condition.success else 0.0), {}
+
+
+class UprightReward(BaseRewardFunction):
+    def __init__(self, robot_idn=0, coef=1.0):
+        self._robot_idn = robot_idn
+        self._coef = float(coef)
+        super().__init__()
+
+    def _step(self, task, env, action):
+        pos, quat = env.robots[self._robot_idn].states[Pose].get_value()
+        rotation_matrix = T.quat2mat(quat)
+        up = rotation_matrix[:, 2]                  # robot’s local +Z in world
+        c = th.clamp(up[2], -1.0, 1.0)  # dot(up, world_z) == R[2,2]
+        r = 0.5 * (c + 1.0) * self._coef
+        return float(r.item()), {"upright_cos": float(c.item())}
