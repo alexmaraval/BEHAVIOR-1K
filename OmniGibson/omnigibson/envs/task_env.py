@@ -12,6 +12,7 @@ import time
 import numpy as np
 import omnigibson as og
 import omnigibson.utils.transform_utils as T
+import omnigibson.utils.transform_utils_np as T_np
 import torch
 import torch as th
 from gello.robots.sim_robot.og_teleop_utils import (
@@ -43,7 +44,8 @@ from rich.table import Table
 # sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
 
 sys.path.append(str(Path(__file__).parent.parent / 'Behavior-Dreamer'))
-sys.path.append(str(Path(__file__).parent.parent / 'Behavior-Dreamer/behavior1k'))
+sys.path.append(str(Path(__file__).parent.parent / 'Behavior-Dreamer / behavior1k'))
+
 from dreamer_training_utils import (
     reward_base_vel_change_regularization,
     reward_arm_pos_change_regularization,
@@ -51,6 +53,7 @@ from dreamer_training_utils import (
     reward_arm_vel_change_regularization
 )
 from b1k.diffik import WholeBodyDifferentialIK
+from b1k.ik import DualArmIKController
 
 gm.ENABLE_FLATCACHE = True
 gm.USE_GPU_DYNAMICS = False
@@ -304,6 +307,7 @@ class TaskEnv:
             A wrapped simulation environment ready for interaction.
         """
         cfg = self._prepare_config()
+        breakpoint()
         _env = og.Environment(configs=cfg)
         _env = instantiate(self.cfg.env_wrapper, env=_env)
         return _env
@@ -1328,6 +1332,164 @@ def make_table(stage_states):
 
     return table
 
+class GraspTaskEnv(TaskEnv):
+    def __init__(
+            self,
+            config: dict[str, ...],
+            motor_type: str = "position",
+            instance_id: int | None = None,
+            max_steps: int | None = None,
+            use_domain_randomization: bool = False,
+            subtask_index: int | None = 1,
+            t: int = 1/120
+    ):
+        super().__init__(
+            config=config,
+            motor_type=motor_type,
+            instance_id=instance_id,
+            max_steps=max_steps,
+            use_domain_randomization=use_domain_randomization,
+            subtask_index=subtask_index
+        )
+        self.handle_world = np.array([[-0.225255,0.974263,0.008471,8.4034],
+                                       [0.962660,0.223896,-0.152175,-1.0522],
+                                       [-0.150155,-0.026123,-0.988317,0.5880],
+                                       [0.0, 0.0, 0.0, 1.0]])
+        self.t = t
+        self.dual_arm_solver = DualArmIKController(t)
+    
+    def load_task_instance(self):
+        scene_model = self._env.task.scene_name
+        # tro_filename = self._env.task.get_cached_activity_scene_filename(
+        #     scene_model=scene_model,
+        #     activity_name=self._env.task.activity_name,
+        #     activity_definition_id=self._env.task.activity_definition_id,
+        #     activity_instance_id=self.instance_id,
+        # )
+        tro_file_path = os.path.join(
+            get_task_instance_path(scene_model),
+            f"json/{scene_model}_task_{self._env.task.activity_name}_instances/grasp_fridge_handle_subtask.json",
+        )
+
+        if self.use_domain_randomization:
+            scene_data = self.randomize_scene_instances(Path(tro_file_path).parent)
+        else:
+            with open(tro_file_path, "r") as f:
+                scene_data = json.load(f)
+
+        tro_state = recursively_convert_to_torch(scene_data)
+        for tro_key, state_data in tro_state.items():
+            if tro_key == "robot_poses":
+                presampled_robot_poses = state_data
+                robot_pos = presampled_robot_poses[self._robot.model_name][0]["position"]
+                robot_quat = presampled_robot_poses[self._robot.model_name][0]["orientation"]
+                self._robot.set_position_orientation(robot_pos, robot_quat)
+                # Write robot poses to scene metadata
+                self._env.scene.write_task_metadata(key=tro_key, data=state_data)
+            else:
+                self._env.task.object_scope[tro_key].load_state(state_data, serialized=False)
+
+        # Try to ensure that all task-relevant objects are stable
+        # They should already be stable from the sampled instance, but there is some issue where loading the state
+        # causes some jitter (maybe for small mass / thin objects?)
+        for _ in range(25):
+            og.sim.step_physics()
+            for entity in self._env.task.object_scope.values():
+                if not entity.is_system and entity.exists:
+                    entity.keep_still()
+
+        self._env.scene.update_initial_file()
+        self._env.scene.reset()
+
+    
+    def solve_IK(self):
+        while np.linalg.norm(self.handle_robot_pos - self.robot_eef_left_pos) > 0.01:
+            self.handle_robot = np.linalg.inv(self.robot_world) @ self.handle_world
+            self.handle_robot_pos = self.handle_robot[0:3,3]
+            self.handle_robot_quat = T_np.mat2quat(self.handle_robot[0:3,0:3])
+            config = {
+                "pG_left": self.handle_robot_pos,
+                "pG_right": self.robot_eef_right_pos,
+                "rG_left": self.handle_robot_quat,
+                "rG_right": self.robot_eef_right_quat,
+                "w_dq": 0.01,
+                "w_p": 1e8,
+                "w_qn": 1e5,
+                "qn": self.init_upper_joint,
+                "w_r": 1e8,
+                "w_gaze": 1e3,
+                "q": self.current_upper_joint
+            }
+            self.dual_arm_solver.reset(config)
+
+            if self.dual_arm_solver.solve():
+                dq = self.dual_arm_solver.get_solution()
+                next_q = self.current_upper_joint + dq * self.t ## trunk + left_arm + right_arm
+            else:
+                print("Cannot find the solution! The upper body will remain as the same as the previous step!")
+                next_q = self.current_upper_joint
+
+            action = torch.from_numpy(np.concatenate([np.zeros(3),
+                                next_q[:4],
+                                next_q[4:11],
+                                np.ones(1),
+                                next_q[11:18],
+                                np.ones(1)], axis=-1))
+
+            obs, _, _, _, _ = self.step(action)
+            self.current_upper_joint = torch.cat([obs["robot_r1"]["proprio"][236:240],
+                                            obs["robot_r1"]["proprio"][158:165],
+                                            obs["robot_r1"]["proprio"][197:204],
+                                            ], dim=-1).detach().cpu().numpy()
+            
+            robot_pos = obs["robot_r1"]["proprio"][0:3]
+            robot_ori = obs["robot_r1"]["proprio"][3:6]
+            self.robot_world = self.convert_transformation_matrix(robot_pos, robot_ori).detach().cpu().numpy()
+            # self.robot_eef_left_pos = obs["robot_r1"]["proprio"][186:189].detach().cpu().numpy()
+            # self.robot_eef_left_quat = obs["robot_r1"]["proprio"][189:193].detach().cpu().numpy()
+            self.robot_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
+            self.robot_eef_right_quat = obs["robot_r1"]["proprio"][228:232].detach().cpu().numpy()
+
+
+    def step(self, action):
+        obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
+
+        return obs, reward_env, terminated_env, truncated_env, info_env
+        
+
+    def reset(self):
+        self._env.robots[0].reset()
+        obs, _ = self._env.reset()
+        self.load_task_instance()
+        robot_pos = obs["robot_r1"]["proprio"][0:3]
+        robot_ori = obs["robot_r1"]["proprio"][3:6]
+        self.robot_world = self.convert_transformation_matrix(robot_pos, robot_ori).detach().cpu().numpy()
+        # self.robot_eef_left_pos = obs["robot_r1"]["proprio"][186:189].detach().cpu().numpy()
+        # self.robot_eef_left_quat = obs["robot_r1"]["proprio"][189:193].detach().cpu().numpy()
+        self.robot_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
+        self.robot_eef_right_quat = obs["robot_r1"]["proprio"][228:232].detach().cpu().numpy()
+
+        self.current_upper_joint = torch.cat([obs["robot_r1"]["proprio"][236:240],
+                                          obs["robot_r1"]["proprio"][158:165],
+                                          obs["robot_r1"]["proprio"][197:204],
+                                           ], dim=-1).detach().cpu().numpy()
+        self.init_upper_joint = torch.cat([obs["robot_r1"]["proprio"][236:240],
+                                          obs["robot_r1"]["proprio"][158:165],
+                                          obs["robot_r1"]["proprio"][197:204],
+                                           ], dim=-1).detach().cpu().numpy()
+
+        if self.task_combo is not None:
+            self.task_combo.reset(self._env)
+        self._reset_subtask_progress()
+
+        return obs
+    
+    def convert_transformation_matrix(self, pos, ori):
+        rotmat = T.euler2mat(ori)
+        transform = th.eye(4)
+        transform[0:3,0:3] = rotmat
+        transform[0:3,3] = pos
+        return transform
 
 class TaskEnvRepeatWrapper(TaskEnv):
     def __init__(
