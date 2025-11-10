@@ -160,7 +160,7 @@ class TraversableMap(BaseMap):
         idx = th.randint(0, high=trav_space[0].shape[0], size=(1,)).item()
         xy_map = th.tensor([trav_space[0][idx], trav_space[1][idx]])
         x, y = self.map_to_world(xy_map)
-        z = self.floor_heights[floor]
+        z = self.floor_hmap_to_worldeights[floor]
         return floor, th.tensor([x, y, z])
 
     def get_shortest_path(self, floor, source_world, target_world, entire_path=False, robot=None):

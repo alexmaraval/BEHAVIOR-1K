@@ -10,9 +10,10 @@ from omnigibson.robots import BaseRobot
 from omnigibson.object_states import Pose
 from omnigibson.utils.asset_utils import get_task_instance_path
 from omnigibson.utils.python_utils import recursively_convert_to_torch
-from omnigibson.utils.motion_planning_utils import astar
+from omnigibson.utils.motion_planning_utils import astar, find_nearest_free
 from omnigibson.learning.utils.config_utils import register_omegaconf_resolvers
 from omnigibson.envs.env_wrapper import EnvironmentWrapper
+from omnigibson.tasks.task_utils import _front_target
 from gello.robots.sim_robot.og_teleop_utils import (
     augment_rooms,
     load_available_tasks,
@@ -77,7 +78,6 @@ class TestEnv:
         self.n_success_trials = 0
         self.total_time = 0
         self.robot_action = dict()
-
         self.env = self.load_env(env_wrapper=self.cfg.env_wrapper)
         self.robot = self.load_robot()
 
@@ -93,6 +93,7 @@ class TestEnv:
         available_tasks = load_available_tasks()
         # Load the seed instance by default
         task_cfg = available_tasks[task_name][0]
+        breakpoint()
         robot_type = self.cfg.robot.type
         assert robot_type == "R1Pro", f"Got invalid robot type: {robot_type}, only R1Pro is supported."
         cfg = generate_basic_environment_config(task_name=task_name, task_cfg=task_cfg)
@@ -371,16 +372,20 @@ class FindPath:
         map_size = trav_map.shape[0]
         trav_map = self.erode_trav_map(trav_map, robot=self.env.env.robots[0])
         source_map = tuple(self.world_to_map(self.env.env.robots[0].states[Pose].get_value()[0][:2], map_size).tolist())
-        target_map = tuple(self.world_to_map(self.env.env.scene.object_registry("name", obj).get_position_orientation()[0][:2], map_size).tolist())
+        if trav_map[source_map] == 0:
+            source_map = find_nearest_free(trav_map, source_map) 
+        target_map = tuple(self.world_to_map(_front_target(self.env.env.scene.object_registry("name", obj), offset=0.5)[:2], map_size).tolist())
+        if trav_map[target_map] == 0:
+            target_map = find_nearest_free(trav_map, target_map) 
         path_map = astar(trav_map, source_map, target_map)
-        breakpoint()
+
         if path_map is None:
             # No traversable path found
             return None, None
-        path_world = self.map_to_world(path_map, map_size)
-        geodesic_distance = th.sum(th.norm(path_world[1:] - path_world[:-1], dim=1))
+        path_world = self.map_to_world(path_map.detach().cpu().numpy(), map_size)
+        geodesic_distance = np.sum(np.linalg.norm(path_world[1:] - path_world[:-1], axis=1))
         path_world = path_world[:: self.waypoint_interval]
-        breakpoint()
+   
         return path_world, geodesic_distance
 
 if __name__ == "__main__":
@@ -397,9 +402,10 @@ if __name__ == "__main__":
     env.reset()
     env.load_task_instance(0)
 
-    obj_name = "radio_89"
-    map_resolution = 0.01
-    waypoint_resolution = 0.2
+    # obj_name = "radio_89"
+    obj_name = "fridge_dszchb_0"
+    map_resolution = 0.05
+    waypoint_resolution = 0.05
     path =  FindPath(env, map_resolution, waypoint_resolution)
     astar_path = path.get_shortest_path(obj_name)
     ## radio name

@@ -1,4 +1,5 @@
 import heapq
+from collections import deque
 import math
 
 import torch as th
@@ -632,3 +633,27 @@ def astar(search_map, start, goal, eight_connected=True):
 
     # Return None if no path is found
     return None
+
+
+def find_nearest_free(grid, start):
+    h = len(grid)
+    w = len(grid[0])
+    sx, sy = start  # (row, col)
+
+    q = deque()
+    q.append((sx, sy))
+    visited = [[False]*w for _ in range(h)]
+    visited[sx][sy] = True
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+
+    while q:
+        x, y = q.popleft()
+
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < h and 0 <= ny < w and not visited[nx][ny]:
+                visited[nx][ny] = True
+                if grid[nx][ny] == 255:
+                    return (nx, ny)
+                q.append((nx, ny))
