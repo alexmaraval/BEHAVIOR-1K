@@ -12,7 +12,7 @@ from omnigibson.termination_conditions.falling import Falling, ObjectFalling
 from omnigibson.termination_conditions.termination_condition_base import SuccessCondition
 from omnigibson.termination_conditions.timeout import Timeout
 from omnigibson.utils.python_utils import classproperty
-
+from omnigibson.reward_functions.reward_function_base import BaseRewardFunction
 
 class _PredicateSatisfied(SuccessCondition):
     """Success when target object's predicate equals the desired value."""
@@ -81,7 +81,7 @@ class _PredicateToggleTask(BaseTask):
 
         return terminations
 
-    def potential_fcn(self, env):
+    def potential_fcn(self, env) -> float:
         obj = _get_named(env, self._target_object_name)
         if obj is not None:
             obj_pos, _ = obj.get_position_orientation()
@@ -96,7 +96,7 @@ class _PredicateToggleTask(BaseTask):
                 min_dist = val if min_dist is None else min(min_dist, val)
             return min_dist
 
-        return th.tensor(0.0)
+        return 0.0
 
     def _create_reward_functions(self):
         rewards = dict()
@@ -162,6 +162,34 @@ class CloseTask(_PredicateToggleTask):
         super().__init__(target_object_name=target_object_name, desired_predicate="open", desired_value=False, **kwargs)
 
 
+class _RelativeSatisfied(SuccessCondition):
+    """Success when relative predicate between (a=target, b=source) equals desired value."""
+
+    def __init__(self, target_object_name: str, source_object_name: str, predicate: str, desired_value: bool):
+        self._tgt = target_object_name
+        self._src = source_object_name
+        self._pred = predicate.lower()
+        self._val = bool(desired_value)
+        super().__init__()
+
+    def _get_state(self, a, b):
+        if self._pred == "next_to" and NextTo in a.states:
+            return a.states[NextTo].get_value(b)
+        if self._pred == "inside" and Inside in a.states:
+            return b.states[Inside].get_value(a)
+        if self._pred == "on_top" and OnTop in a.states:
+            return a.states[OnTop].get_value(b)
+        return None
+
+    def _step(self, task, env, action):
+        a = _get_named(env, self._tgt)
+        b = _get_named(env, self._src)
+        if a is None or b is None:
+            return False
+        cur = self._get_state(a, b)
+        return cur == self._val
+
+
 class _RelativeStatusTask(BaseTask):
     def __init__(
             self,
@@ -169,17 +197,22 @@ class _RelativeStatusTask(BaseTask):
             source_object_name: str,
             desired_predicate: str,
             desired_value: bool,
+            require_release=False,
             termination_config=None,
             reward_config=None,
+            skip_collision_with_objs=None,
     ):
         self._target_object_name = target_object_name
         self._source_object_name = source_object_name
         self._pred = desired_predicate.lower()
         self._val = bool(desired_value)
+        self._require_release = require_release
 
         term_cfg = dict(termination_config or {})
         term_cfg.setdefault("max_steps", 4000)
         super().__init__(termination_config=term_cfg, reward_config=reward_config or {})
+
+        self._skip_collision_with_objs_names = skip_collision_with_objs
 
     def _create_termination_conditions(self):
         terminations = dict()
@@ -191,15 +224,45 @@ class _RelativeStatusTask(BaseTask):
         terminations["falling"] = Falling(
             robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]
         )
-        terminations["object_falling"] = ObjectFalling(obj_name=self._source_object_name,
-                                        fall_height=self._termination_config["fall_height"])
-        # terminations["object_falling"] = ObjectFalling(obj_name=self._target_object_name,
-        #                                                fall_height=self._termination_config["fall_height"])
+        terminations["object_falling"] = ObjectFalling(
+            obj_name=self._source_object_name,
+            fall_height=self._termination_config["fall_height"],
+        )
+        terminations["predicate"] = _RelativeSatisfied(
+            target_object_name=self._target_object_name,
+            source_object_name=self._source_object_name,
+            predicate=self._pred,
+            desired_value=self._val,
+        )
 
         return terminations
 
+    def potential_fcn(self, env):
+        a = _get_named(env, self._target_object_name)
+        b = _get_named(env, self._source_object_name)
+        if a is None or b is None:
+            return th.tensor(0.0)
+
+        pa, _ = a.get_position_orientation()
+        pb, _ = b.get_position_orientation()
+        pa = th.as_tensor(pa, dtype=th.float32)
+        pb = th.as_tensor(pb, dtype=th.float32)
+        return th.norm((pa - pb))
+
     def _create_reward_functions(self):
-        return {}
+        rewards = dict()
+
+        rewards["potential"] = PotentialReward(
+            potential_fcn=lambda env: float(self.potential_fcn(env)),
+            r_potential=self._reward_config.get("r_potential", 1.0),
+        )
+
+        rewards["success_bonus"] = SuccessBonusReward(
+            success_condition=self._termination_conditions["predicate"],
+            r_success=self._reward_config.get("r_success", 1.0),
+        )
+
+        return rewards
 
     def reset(self, env):
         super().reset(env)
@@ -214,41 +277,19 @@ class _RelativeStatusTask(BaseTask):
         return None
 
     def step(self, env, action):
-        info = {"done": {"success": False, "termination_conditions": {}}}
+        reward, done, info = super().step(env, action)
+        if self._require_release:
+            robot = env.robots[0]
+            released = not robot.states[IsGrasping].get_value(self._source_object_name)
+            if  released:
+                info["done"]["success"] = True
+                info["done"]["termination_conditions"] = dict(predicate={"done": True})
+                return reward, True, info
+            else:
+                info["done"]["success"] = False
+                return reward, False, info
 
-        a = _get_named(env, self._target_object_name)
-        b = _get_named(env, self._source_object_name)
-        reward_offset = self._reward_config.get("r_offset", 0.0)
-        if a is None or b is None:
-            missing = []
-            if a is None:
-                missing.append(self._target_object_name)
-            if b is None:
-                missing.append(self._source_object_name)
-            info["done"]["termination_conditions"] = dict(object_not_found={"done": True, "which": missing})
-            return 0.0, True, info
-
-        cur = self._get_state(a, b)
-        if cur == self._val:
-            info["done"]["success"] = True
-            info["done"]["termination_conditions"] = dict(predicate={"done": True})
-            return reward_offset + 1.0, True, info
-
-        # Not yet successful, allow global timeout
-        base_done, base_info = super()._step_termination(
-            env=env,
-            action=action,
-            info={"done": {"success": False, "termination_conditions": {}}},
-        )
-        tc = dict(base_info.get("done", {}).get("termination_conditions", {}))
-        for k, v in list(tc.items()):
-            if not isinstance(v, dict):
-                tc[k] = {"done": bool(v)}
-        if base_done and not any(d.get("done", False) for d in tc.values()):
-            tc.setdefault("timeout", {"done": True})
-        info["done"]["termination_conditions"] = tc
-        done_out = any(d.get("done", False) for d in tc.values())
-        return reward_offset, done_out, info
+        return reward, done, info
 
     @classproperty
     def default_termination_config(cls):
@@ -260,7 +301,11 @@ class _RelativeStatusTask(BaseTask):
 
     @classproperty
     def default_reward_config(cls):
-        return {}
+        return {
+            "r_offset": 0.0,
+            "r_potential": 1.0,
+            "r_success": 1.0,
+        }
 
 
 class NextToTask(_RelativeStatusTask):
@@ -305,6 +350,7 @@ class OnTopStableTask(BaseTask):
             require_release: bool = True,  # must not be grasped by robot
             termination_config=None,
             reward_config=None,
+            skip_collision_with_objs=None,
     ):
         self._tgt = target_object_name
         self._src = source_object_name
@@ -315,8 +361,28 @@ class OnTopStableTask(BaseTask):
         term_cfg.setdefault("max_steps", 4000)
         super().__init__(termination_config=term_cfg, reward_config=reward_config or {})
 
+        self._skip_collision_with_objs_names = skip_collision_with_objs
+
     def _create_termination_conditions(self):
-        return {"timeout": Timeout(max_steps=self._termination_config["max_steps"])}
+        terminations = dict()
+
+        terminations["max_collision"] = _MaxCollisionFiltered(
+            self, max_collisions=self._termination_config["max_collisions"]
+        )
+        terminations["timeout"] = Timeout(max_steps=self._termination_config["max_steps"])
+        terminations["falling"] = Falling(
+            robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]
+        )
+        terminations["object_falling"] = ObjectFalling(
+            obj_name=self._source_object_name,
+            fall_height=self._termination_config["fall_height"],
+        )
+        terminations["predicate"] = _RelativeSatisfied(
+            target_object_name=self._target_object_name,
+            source_object_name=self._source_object_name,
+            predicate=self._pred,
+            desired_value=self._val,
+        )
 
     def _create_reward_functions(self):
         return {}

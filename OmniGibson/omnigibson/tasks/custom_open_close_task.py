@@ -221,10 +221,11 @@ class SufficientlyOpenTask(BaseTask):
         self._allowed_frac = float(allowed_frac)
         self._status = status
         self._prev_progress = None
-        self._skip_collision_with_objs_names = skip_collision_with_objs
         term_cfg = dict(termination_config or {})
         term_cfg.setdefault("max_steps", 4000)
         super().__init__(termination_config=term_cfg, reward_config=reward_config or {})
+
+        self._skip_collision_with_objs_names = skip_collision_with_objs
 
     def _create_termination_conditions(self):
         return {
@@ -336,6 +337,7 @@ class SufficientlyClosedTask(SufficientlyOpenTask):
             allowed_frac: float = 0.1,
             termination_config=None,
             reward_config=None,
+            skip_collision_with_objs=None,
     ):
         super().__init__(
             target_object_name=target_object_name,
@@ -344,6 +346,7 @@ class SufficientlyClosedTask(SufficientlyOpenTask):
             status="closed",
             termination_config=termination_config,
             reward_config=reward_config,
+            skip_collision_with_objs=skip_collision_with_objs,
         )
         self._prev_progress = None  # track previous closed progress
 
