@@ -844,7 +844,7 @@ class TaskEnv:
         # self._robot.set_position_orientation([8.1689e+00, -8.0334e-01, 5.0101e-03],
         #                                      [1.2957e-04, -9.1167e-04, 7.3287e-01, -6.8037e-01])
         x = random.uniform(8, 9)
-        y = random.uniform(-9, -8)
+        y = random.uniform(-7, -8.5)
         z = 5.0101e-03
         orientation = [1.2957e-04, -9.1167e-04, 7.3287e-01, -6.8037e-01]
 
