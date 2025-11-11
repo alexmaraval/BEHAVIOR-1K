@@ -291,11 +291,12 @@ class SufficientlyOpenTask(BaseTask):
                 dense = max(-clip, min(clip, dense))
         self._prev_progress = prog
 
-        ang_info = _open_angles(obj)
-        info["progress"] = prog
-        info["open_fraction"] = _open_fraction(obj)
-        info["open_angle_deg"] = ang_info["max_angle_deg"]
-        info["open_debug"] = ang_info["per_joint"]
+        info["reward"] = dict(reward_breakdown={})
+        info["reward"]["reward_breakdown"]["progress"] = prog
+        # ang_info = _open_angles(obj)
+        # info["open_fraction"] = _open_fraction(obj)
+        # info["open_angle_deg"] = ang_info["max_angle_deg"]
+        # info["open_debug"] = ang_info["per_joint"]
         if ok:
             info["done"]["success"] = True
             info["done"]["termination_conditions"] = dict(predicate={"done": True})
@@ -381,11 +382,12 @@ class SufficientlyClosedTask(SufficientlyOpenTask):
         self._prev_progress = closed_prog
 
         # Debug
-        ang_info = _open_angles(obj)
-        info["closed_progress"] = closed_prog
-        info["open_fraction"] = open_frac
-        info["open_angle_deg"] = ang_info["max_angle_deg"]
-        info["open_debug"] = ang_info["per_joint"]
+        info["reward"] = dict(reward_breakdown={})
+        info["reward"]["reward_breakdown"]["closed_progress"] = closed_prog
+        # ang_info = _open_angles(obj)
+        # info["open_fraction"] = open_frac
+        # info["open_angle_deg"] = ang_info["max_angle_deg"]
+        # info["open_debug"] = ang_info["per_joint"]
 
         if ok:
             info["done"]["success"] = True

@@ -1,3 +1,4 @@
+import numpy as np
 import omnigibson.utils.transform_utils as T
 import torch as th
 from omnigibson.object_states import AttachedTo
@@ -15,9 +16,16 @@ from omnigibson.utils.python_utils import classproperty
 class _GraspSuccess(SuccessCondition):
     """Success when the specified object is currently grasped by any arm."""
 
-    def __init__(self, obj_name: str, robot_idn: int = 0):
+    def __init__(self, obj_name: str, robot_idn: int = 0, min_consecutive_steps: int = 1):
+        """
+        Args:
+            min_consecutive_steps (int): number of consecutive steps to grasp for before considering grasping done
+        """
         self._obj_name = obj_name
         self._robot_idn = int(robot_idn)
+        self._min_consecutive_steps = min_consecutive_steps
+        self._grasping_consecutive_steps = 0
+        self._attached_consecutive_steps = 0
         super().__init__()
 
     def _is_grasping_target(self, env) -> bool:
@@ -27,11 +35,17 @@ class _GraspSuccess(SuccessCondition):
             return False
 
         if IsGrasping in robot.states and robot.states[IsGrasping].get_value(obj):
-            return True
+            self._grasping_consecutive_steps += 1
+            if self._grasping_consecutive_steps >= self._min_consecutive_steps:
+                return True
 
         if AttachedTo in obj.states and obj.states[AttachedTo].get_value(robot):
-            return True
+            self._attached_consecutive_steps += 1
+            if self._attached_consecutive_steps >= self._min_consecutive_steps:
+                return True
 
+        self._grasping_consecutive_steps = 0
+        self._attached_consecutive_steps = 0
         return False
 
     def _step(self, task, env, action):
@@ -49,13 +63,17 @@ class _SimpleGraspReward(BaseRewardFunction):
             self, obj_name: str,
             dist_coeff: float = 0.001,
             ori_coeff: float = 0.001,
-            transform_matrix=None
+            transform_matrix=None,
+            min_consecutive_steps: int = 1
     ):
         self._obj_name = obj_name
         self._dist_coeff = dist_coeff
         self._ori_coeff = ori_coeff
         self.transform_matrix = transform_matrix
         self._potential = None
+        self._min_consecutive_steps = min_consecutive_steps
+        self._grasping_consecutive_steps = 0
+        self._attached_consecutive_steps = 0
         super().__init__()
 
     def _eef_position_orientation(self, env):
@@ -67,11 +85,17 @@ class _SimpleGraspReward(BaseRewardFunction):
 
     def _is_grasping(self, robot, obj) -> bool:
         if IsGrasping in robot.states and robot.states[IsGrasping].get_value(obj):
-            return True
+            self._grasping_consecutive_steps += 1
+            if self._grasping_consecutive_steps >= self._min_consecutive_steps:
+                return True
 
         if AttachedTo in obj.states and obj.states[AttachedTo].get_value(robot):
-            return True
+            self._attached_consecutive_steps += 1
+            if self._attached_consecutive_steps >= self._min_consecutive_steps:
+                return True
 
+        self._grasping_consecutive_steps = 0
+        self._attached_consecutive_steps = 0
         return False
 
     def reset(self, task, env):
@@ -140,7 +164,9 @@ class RobustGraspTask(BaseTask):
     def _create_termination_conditions(self):
         return {
             "timeout": Timeout(max_steps=self._termination_config["max_steps"]),
-            "graspgoal": _GraspSuccess(obj_name=self._obj_name),
+            "graspgoal": _GraspSuccess(
+                obj_name=self._obj_name, min_consecutive_steps=self._termination_config["min_consecutive_steps"]
+            ),
             "falling": Falling(robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]),
             "object_falling": ObjectFalling(obj_name=self._obj_name,
                                             fall_height=self._termination_config["fall_height"]),
@@ -178,6 +204,7 @@ class RobustGraspTask(BaseTask):
         return {
             "max_collisions": 1,
             "max_steps": 500,
+            "min_consecutive_steps": 20,
             "fall_height": 0.03,
         }
 

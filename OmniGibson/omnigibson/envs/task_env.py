@@ -194,6 +194,7 @@ class TaskEnv:
             max_steps: int | None = None,
             use_domain_randomization: bool = False,
             subtask_index: int | None = None,
+            tro_filename: str = None
     ) -> None:
         """
         Initialize the TaskEnv environment and load all required components.
@@ -214,6 +215,10 @@ class TaskEnv:
         self._robot = None
         self.robot_type = "R1Pro"
         self.subtask_index = subtask_index
+        self._tro_filename = tro_filename
+
+        if self.use_domain_randomization and self._tro_filename is not None:
+            raise ValueError(f"cannot use both `use_domain_randomization` and `tro_filename`")
 
         # Set up headless mode and video path from config
         gm.HEADLESS = self.cfg.headless
@@ -280,7 +285,7 @@ class TaskEnv:
             )
         ]
         # Update observation modalities
-        cfg["robots"][0]["obs_modalities"] = ["proprio", "rgb"]  # TODO include more or take it as arg
+        cfg["robots"][0]["obs_modalities"] = ["proprio", "rgb"] # TODO include more or take it as arg, e.g. "depth_linear"
         cfg["robots"][0]["proprio_obs"] = list(PROPRIOCEPTION_INDICES["R1Pro"].keys())
         cfg["task"]["termination_config"]["max_steps"] = int(human_stats["length"] * 2)
         if self.cfg.robot.controllers is not None:
@@ -325,6 +330,8 @@ class TaskEnv:
             activity_definition_id=self._env.task.activity_definition_id,
             activity_instance_id=self.instance_id,
         )
+        if self._tro_filename is not None:
+            tro_filename = self._tro_filename
         tro_file_path = os.path.join(
             get_task_instance_path(scene_model),
             f"json/{scene_model}_task_{self._env.task.activity_name}_instances/{tro_filename}-tro_state.json",
@@ -1062,6 +1069,7 @@ class TaskEnvRepeatWrapper(TaskEnv):
             max_steps: int | None = None,
             use_domain_randomization: bool = False,
             subtask_index: int | None = None,
+            tro_filename: str = None,
             action_repeat: int = 1,
             action_smoothing: bool = False,
             action_smoothing_factor: float = 0.9,
@@ -1072,7 +1080,8 @@ class TaskEnvRepeatWrapper(TaskEnv):
             instance_id=instance_id,
             max_steps=max_steps,
             use_domain_randomization=use_domain_randomization,
-            subtask_index=subtask_index
+            subtask_index=subtask_index,
+            tro_filename=tro_filename
         )
         assert action_repeat >= 1, action_repeat
         self.action_repeat = action_repeat
