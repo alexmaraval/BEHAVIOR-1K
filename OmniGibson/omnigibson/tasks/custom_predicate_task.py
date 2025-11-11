@@ -12,6 +12,7 @@ from omnigibson.termination_conditions.falling import Falling, ObjectFalling
 from omnigibson.termination_conditions.termination_condition_base import SuccessCondition
 from omnigibson.termination_conditions.timeout import Timeout
 from omnigibson.utils.python_utils import classproperty
+from omnigibson.object_states import AttachedTo
 from omnigibson.reward_functions.reward_function_base import BaseRewardFunction
 
 class _PredicateSatisfied(SuccessCondition):
@@ -176,9 +177,11 @@ class _RelativeSatisfied(SuccessCondition):
         if self._pred == "next_to" and NextTo in a.states:
             return a.states[NextTo].get_value(b)
         if self._pred == "inside" and Inside in a.states:
-            return b.states[Inside].get_value(a)
+            return a.states[Inside].get_value(b)
         if self._pred == "on_top" and OnTop in a.states:
             return a.states[OnTop].get_value(b)
+        if self._pred == "attached_to" and OnTop in a.states:
+            return a.states[AttachedTo].get_value(b)
         return None
 
     def _step(self, task, env, action):
@@ -274,6 +277,9 @@ class _RelativeStatusTask(BaseTask):
             return b.states[Inside].get_value(a)
         if self._pred == "on_top" and OnTop in a.states:
             return a.states[OnTop].get_value(b)
+        if self._pred == "attached_to" and OnTop in a.states:
+            return a.states[AttachedTo].get_value(b)
+
         return None
 
     def step(self, env, action):
@@ -336,6 +342,15 @@ class OnTopTask(_RelativeStatusTask):
             target_object_name=target_object_name,
             source_object_name=source_object_name,
             desired_predicate="on_top",
+            desired_value=desired_value,
+            **kwargs,
+        )
+class AttachToTask(_RelativeStatusTask):
+    def __init__(self, target_object_name: str, source_object_name: str, desired_value: bool = True, **kwargs):
+        super().__init__(
+            target_object_name=target_object_name,
+            source_object_name=source_object_name,
+            desired_predicate="attached_to",
             desired_value=desired_value,
             **kwargs,
         )
