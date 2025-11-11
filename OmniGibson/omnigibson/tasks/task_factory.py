@@ -471,7 +471,7 @@ ac_grasp_camera = partial(
 ac_move_to_tripod = partial(
     BaseNavigationTask,
     target_object_name=name_tripod,
-    goal_tolerance=0.85,
+    goal_tolerance=1,
     skip_collision_with_objs=[name_camera],
     termination_config={"max_steps": 5000, "max_collisions": 50},
 )
