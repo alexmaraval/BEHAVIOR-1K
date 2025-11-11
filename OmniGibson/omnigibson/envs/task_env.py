@@ -34,6 +34,7 @@ from omnigibson.learning.utils.obs_utils import (
 from omnigibson.macros import gm
 from omnigibson.robots import BaseRobot
 from omnigibson.tasks.task_factory import get_sub_tasks
+from omnigibson.tasks.task_utils import set_door_angle_deg
 from omnigibson.utils.asset_utils import get_task_instance_path
 from omnigibson.utils.python_utils import recursively_convert_to_torch
 from rich.table import Table
@@ -410,6 +411,7 @@ class TaskEnv:
         self._env.robots[0].reset()
         obs, info = self._env.reset()
         self.load_task_instance()
+        self.open_fridge_randomise()
 
         self.frames = None
 
@@ -837,6 +839,27 @@ class TaskEnv:
 
         return scene_data
 
+    def open_fridge_randomise(self):
+        from omnigibson.tasks.task_factory import name_fridge
+        # self._robot.set_position_orientation([8.1689e+00, -8.0334e-01, 5.0101e-03],
+        #                                      [1.2957e-04, -9.1167e-04, 7.3287e-01, -6.8037e-01])
+        x = random.uniform(8, 9)
+        y = random.uniform(-9, -8)
+        z = 5.0101e-03
+        orientation = [1.2957e-04, -9.1167e-04, 7.3287e-01, -6.8037e-01]
+
+        self._robot.set_position_orientation([x, y, z], orientation)
+        set_door_angle_deg(env=self._env, obj_name=name_fridge, deg=random.randint(75, 90))
+        # pos = th.tensor([7.7494, -1.8819, 0.7802], dtype=th.float32)
+        # quat = th.tensor([-7.9652e-05, -3.5517e-04, 6.3861e-02, 9.9796e-01], dtype=th.float32)
+        # self._env.scene.object_registry("name", "tray_208").set_position_orientation(position=pos, orientation=quat)
+
+        for _ in range(25):
+            og.sim.step_physics()
+            for entity in self._env.task.object_scope.values():
+                if not entity.is_system and entity.exists:
+                    entity.keep_still()
+
 
 # ----- Utilities to drive the example code-----
 
@@ -849,6 +872,7 @@ def mask_other_actions(r, unmasked_action_type='base'):
         if unmasked_action_type in slice_key:
             a[action_idx] = 1.0
     return a
+
 
 def build_upper_body_hold_action(r, use_reset_pose=True):
     a = torch.zeros(r.action_dim, dtype=torch.float32)
@@ -1112,12 +1136,16 @@ if __name__ == "__main__":
 
         hold_action_var = build_upper_body_hold_action(env._robot)
         hold_action_mask = mask_other_actions(env._robot, unmasked_action_type="base")
-
+        i = 0
         with Live(make_table(stage_states), console=console, refresh_per_second=4) as live:
             for _, row in df.iterrows():
+                i += 1
+                if i <= 1041:
+                    continue
                 base_pos = obs["robot_r1::proprio"][140:142]
                 yaw2d = obs["robot_r1::proprio"][149]
                 action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
+                breakpoint()
 
                 # action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
                 #     action, hold_action_var, hold_action_mask
@@ -1128,23 +1156,37 @@ if __name__ == "__main__":
                 idx = sub_task_info["index"]
                 next_idx = idx + 1
                 has_next_stage = next_idx < len(stage_states)
+                # if idx ==1:
+                #     i +=1
+                #     if i >= 300:
+                #         breakpoint()
+                #         env._robot.get_position_orientation()
+                #         env._robot.get_eef_position()
+                #         env._robot.get_eef_orientation()
+                #         env._env.scene.object_registry("name", "tray_208").get_position_orientation()
 
                 # Update stage info
                 if sub_task_info["done"]:
+                    print(f"steps count : {i}")
+                    if idx == 2:
+                        breakpoint()
                     stage_states[idx]["status"] = "completed"
+
+                    # Move to the next stage
+                    if has_next_stage:
+                        stage_states[next_idx]["status"] = "active"
+                        step_rewards.update({stage_states[next_idx]['name']: []})
+                        step_success.update({stage_states[next_idx]['name']: []})
+
                 elif any(sub_task_info.get(k, False) for k in ("falling", "max_collision", "timeout")):
                     console.print("[red]Sub task terminated due to collision/falling/timeout")
                     stage_states[idx]["status"] = "failed"
 
                 stage_states[idx]["reward"] = sub_task_info["reward"]
-                step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
-                step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
-
-                # Move to the next stage
-                if sub_task_info["done"] and has_next_stage:
-                    stage_states[next_idx]["status"] = "active"
-                    step_rewards.update({stage_states[next_idx]['name']: []})
-                    step_success.update({stage_states[next_idx]['name']: []})
+                if stage_states[idx]['name'] in step_rewards:
+                    step_rewards[stage_states[idx]['name']].append(float(sub_task_info["reward"]))
+                if stage_states[idx]['name'] in step_success:
+                    step_success[stage_states[idx]['name']].append(int(sub_task_info["done"]))
 
                 live.update(make_table(stage_states))
 
