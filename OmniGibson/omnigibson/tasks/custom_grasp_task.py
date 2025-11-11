@@ -182,6 +182,7 @@ class RobustGraspTask(BaseTask):
                 dist_coeff=cfg["dist_coeff"],
                 ori_coeff=cfg["ori_coeff"],
                 transform_matrix=self.transform_matrix,
+                min_consecutive_steps=self.default_termination_config["min_consecutive_steps"]
             )
         rewards["stand_upright"] = StandUprightReward(
             robot_idn=self._robot_idn, coeff=self._reward_config["r_stand_upright"]

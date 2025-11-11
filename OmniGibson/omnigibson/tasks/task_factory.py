@@ -67,6 +67,15 @@ fridge_handle_transform = np.array(
      [0.0,0.0,0.0,1.0]]
 )
 
+tray_transform = np.array(
+    [[-0.729581,0.621860,-0.284609,-0.598255],
+     [0.564411,0.782507,0.262911,0.829663],
+     [0.386203,0.031179,-0.921887,-0.243461],
+     [0.0,0.0,0.0,1.0]]
+)
+
+
+
 name_fridge = "fridge_dszchb_0"
 name_countertop = "countertop_kelker_0"
 name_pan = "frying_pan_207"
@@ -212,6 +221,7 @@ cb_grasp_tray = partial(
     RobustGraspTask,
     obj_name=name_tray,
     termination_config={"max_steps": 10000},
+    transform_matrix=tray_transform,
     skip_collision_with_objs = [
         name_tray,
         name_bacon_1,
