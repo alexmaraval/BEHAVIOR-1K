@@ -6,7 +6,7 @@ from omnigibson.tasks.custom_grasp_task import RobustGraspTask
 from omnigibson.tasks.custom_open_close_task import SufficientlyClosedTask, SufficientlyOpenTask
 from omnigibson.tasks.custom_point_reaching_task import MoveEEToObjectTask
 from omnigibson.tasks.custom_predicate_task import OnTask
-from omnigibson.tasks.custom_predicate_task import NextToTask, OnTopTask, InsideTask
+from omnigibson.tasks.custom_predicate_task import NextToTask, OnTopTask, InsideTask, AttachToTask
 
 max_steps = 5000
 task_factory = {}
@@ -447,3 +447,49 @@ stages = [
     {"name": "close_fridge_door", "kind": "task", "factory": fp_close_fridge},
 ]
 task_factory.update({"freeze_pies": stages})
+
+
+# -----attach_a_camera_to_a_tripod-----
+
+name_camera = "digital_camera_87"
+name_tripod = "camera_tripod_86"
+
+ac_move_to_camera = partial(
+    BaseNavigationTask,
+    target_object_name=name_camera,
+    goal_tolerance=0.75,
+    termination_config={"max_steps": 5000, "max_collisions": 50},
+)
+
+ac_grasp_camera = partial(
+    RobustGraspTask,
+    obj_name=name_camera,
+    termination_config={"max_steps": 5000},
+    skip_collision_with_objs=[name_camera]
+)
+
+ac_move_to_tripod = partial(
+    BaseNavigationTask,
+    target_object_name=name_tripod,
+    goal_tolerance=1,
+    skip_collision_with_objs=[name_camera],
+    termination_config={"max_steps": 5000, "max_collisions": 50},
+)
+
+ac_place_camera = partial(
+    AttachToTask,
+    target_object_name=name_camera,
+    source_object_name=name_tripod,
+    termination_config={"max_steps": 10000},
+    skip_collision_with_objs=[name_camera, name_tripod],
+    require_release=True
+)
+
+
+stages = [
+    {"name": "move_to_camera", "factory": ac_move_to_camera},
+    {"name": "pick_camera", "factory": ac_grasp_camera},
+    {"name": "move_to_tripod", "factory": ac_move_to_tripod},
+    {"name": "place_camera", "kind": "task", "factory": ac_place_camera},
+]
+task_factory.update({"attach_a_camera_to_a_tripod": stages})
