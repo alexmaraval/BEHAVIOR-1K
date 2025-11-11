@@ -279,5 +279,5 @@ class BaseNavigationTask(BaseTask):
             "r_collision": 10.0,
             "r_pointgoal": 10.0,
             "r_orientation": 10.0,
-            "r_stand_upright": 1e-3,
+            "r_stand_upright": 5e-3,
         }
