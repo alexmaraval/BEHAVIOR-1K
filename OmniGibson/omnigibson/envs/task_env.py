@@ -1529,7 +1529,7 @@ class GraspTaskEnv_SINGLE(TaskEnv):
             use_domain_randomization: bool = False,
             subtask_index: int | None = 1,
             side: str = "right",
-            T: int = 100  ## T is steps
+            T: int = 2000  ## T is steps
     ):
         super().__init__(
             config=config,
@@ -1604,9 +1604,10 @@ class GraspTaskEnv_SINGLE(TaskEnv):
         self._env.scene.reset()
 
     
-    def solve_IK(self, handle_pos_robot, handle_quat_robot):
+    def solve_IK(self, handle_pos_world, handle_quat_world):
         ## read from demonstrationd)
         for i in tqdm(range(1, self.T + 1)):
+            handle_pos_robot, handle_quat_robot = self.get_handle_in_robot_frame(handle_pos_world, handle_quat_world)
             target_pos, target_quat = self.plan_trajectory(self.robot_init_eef_right_pos, self.robot_init_eef_right_quat, handle_pos_robot, handle_quat_robot, i)
             config = {
                 "q0": self.current_upper_joint_right,
@@ -1628,18 +1629,17 @@ class GraspTaskEnv_SINGLE(TaskEnv):
             q_target_dict = self.ik.get_solution()
             q_target = th.tensor([q_target_dict[n] for n in self.planner.joint_names])
 
-            action = torch.from_numpy(np.concatenate([np.zeros(3),
+            self.action = torch.from_numpy(np.concatenate([np.zeros(3),
                                 q_target[:4],
                                 self.robot_init_left_arm_joint,
                                 np.ones(1),
                                 q_target[4:],
                                 np.ones(1)], axis=-1))
     
-            obs, _, _, _, _ = self.step(action)
+            obs, _, _, _, _ = self.step(self.action)
             self.current_upper_joint_right = torch.cat([obs["robot_r1"]["proprio"][236:240],
                                           obs["robot_r1"]["proprio"][197:204],
                                            ], dim=-1).detach().cpu().numpy()
-            
 
     def plan_trajectory(self, start_pos, start_quat, goal_pos, goal_quat, step):
         frac = step / self.T
@@ -1681,12 +1681,12 @@ class GraspTaskEnv_SINGLE(TaskEnv):
 
     #     return qsol
     
-    def get_planner_solution(self, handle_pos_world, handle_quat_world, duration):
-        handle_pos_robot, handle_quat_robot = self.get_handle_in_robot_frame(handle_pos_world, handle_quat_world)
-        self.solve_IK(handle_pos_robot, handle_quat_robot)
-        # qsol = self.plan_trajectory(self.init_upper_joint, q_target, duration)
-        # breakpoint()
-        return 
+    # def get_planner_solution(self, handle_pos_world, handle_quat_world, duration):
+    #     handle_pos_robot, handle_quat_robot = self.get_handle_in_robot_frame(handle_pos_world, handle_quat_world)
+    #     self.solve_IK(handle_pos_robot, handle_quat_robot)
+    #     # qsol = self.plan_trajectory(self.init_upper_joint, q_target, duration)
+    #     # breakpoint()
+    #     return 
     
     def step(self, action):
         obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
