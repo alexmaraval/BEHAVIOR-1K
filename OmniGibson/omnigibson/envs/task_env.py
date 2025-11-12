@@ -429,6 +429,8 @@ class TaskEnv:
         load_task_instance_time = time.time() - _start
         if self.kwargs.get("open_fridge_random", False):
             self.open_fridge_randomise()
+        elif self.task_name == 'cook_bacon' and self.subtask_index == 4:
+            self.move_to_face_fridge()
 
         self.frames = None
 
@@ -862,6 +864,10 @@ class TaskEnv:
                     scene_data[key] = random.choice(per_file_entries[key])
 
         return scene_data
+
+    def move_to_face_fridge(self):
+        self._robot.set_position_orientation([8.1689e+00, -8.0334e-01, 5.0101e-03],
+                                             [1.2957e-04, -9.1167e-04, 7.3287e-01, -6.8037e-01])
 
     def open_fridge_randomise(self):
         from omnigibson.tasks.task_factory import name_fridge
