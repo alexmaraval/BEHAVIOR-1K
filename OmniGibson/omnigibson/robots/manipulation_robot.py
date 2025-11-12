@@ -187,7 +187,7 @@ class ManipulationRobot(BaseRobot):
 
         # Other variables filled in at runtime
         self._eef_to_fingertip_lengths = None  # dict mapping arm name to finger name to offset
-
+        
         # Initialize other variables used for assistive grasping
         self._ag_obj_in_hand = {arm: None for arm in self.arm_names}
         self._ag_obj_constraints = {arm: None for arm in self.arm_names}

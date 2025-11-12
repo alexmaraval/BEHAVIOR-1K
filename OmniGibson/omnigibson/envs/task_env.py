@@ -307,7 +307,6 @@ class TaskEnv:
             A wrapped simulation environment ready for interaction.
         """
         cfg = self._prepare_config()
-        breakpoint()
         _env = og.Environment(configs=cfg)
         _env = instantiate(self.cfg.env_wrapper, env=_env)
         return _env
@@ -1343,7 +1342,7 @@ class GraspTaskEnv(TaskEnv):
             max_steps: int | None = None,
             use_domain_randomization: bool = False,
             subtask_index: int | None = 1,
-            t: int = 1/120
+            t: float = 1/120
     ):
         super().__init__(
             config=config,
@@ -1353,13 +1352,20 @@ class GraspTaskEnv(TaskEnv):
             use_domain_randomization=use_domain_randomization,
             subtask_index=subtask_index
         )
-        self.handle_world = np.array([[-0.225255,0.974263,0.008471,8.4034],
-                                       [0.962660,0.223896,-0.152175,-1.0522],
-                                       [-0.150155,-0.026123,-0.988317,0.5880],
-                                       [0.0, 0.0, 0.0, 1.0]])
+        self.handle_pos_world = np.array([8.0532, -1.5882, 1.0935])
+        self.handle_quat_world = np.array([-0.4596, -0.5637, 0.5215, -0.4462])
+        self.handle_world = T_np.pose2mat((self.handle_pos_world, self.handle_quat_world))
+        self.handle_robot = np.linalg.inv(self.robot_world) @ self.handle_world
+        self.handle_robot_pos = self.handle_robot[0:3,3]
+        self.handle_robot_quat = T_np.mat2quat(self.handle_robot[0:3,0:3])
+
         self.t = t
+        self.steps = 5 / t # 5 seconds to reach the target
         self.dual_arm_solver = DualArmIKController(t)
-    
+        forward_left = self.dual_arm_solver.left_arm_chain.forward_kinematics(self.left_arm_body_joint)._translation.as_vector()
+        forward_right = self.dual_arm_solver.right_arm_chain.forward_kinematics(self.right_arm_body_joint)._translation.as_vector()
+        breakpoint()
+
     def load_task_instance(self):
         scene_model = self._env.task.scene_name
         # tro_filename = self._env.task.get_cached_activity_scene_filename(
@@ -1405,15 +1411,21 @@ class GraspTaskEnv(TaskEnv):
 
     
     def solve_IK(self):
-        while np.linalg.norm(self.handle_robot_pos - self.robot_eef_left_pos) > 0.01:
-            self.handle_robot = np.linalg.inv(self.robot_world) @ self.handle_world
-            self.handle_robot_pos = self.handle_robot[0:3,3]
-            self.handle_robot_quat = T_np.mat2quat(self.handle_robot[0:3,0:3])
+        step = 0
+        main_frames = []
+        left_frames = []
+        right_frames = []
+
+        while step < self.steps:
+            target_pos_right, target_quat_right = self.plan_trajectory(self.robot_init_eef_right_pos, self.robot_init_eef_right_quat,
+                                                                    self.handle_robot_pos, self.handle_robot_quat,
+                                                                    step)
+            
             config = {
-                "pG_left": self.handle_robot_pos,
-                "pG_right": self.robot_eef_right_pos,
-                "rG_left": self.handle_robot_quat,
-                "rG_right": self.robot_eef_right_quat,
+                "pG_left": self.robot_init_eef_left_pos,
+                "pG_right": target_pos_right,
+                "rG_left": self.robot_init_eef_left_quat,
+                "rG_right": target_quat_right,
                 "w_dq": 0.01,
                 "w_p": 1e8,
                 "w_qn": 1e5,
@@ -1444,15 +1456,28 @@ class GraspTaskEnv(TaskEnv):
                                             obs["robot_r1"]["proprio"][197:204],
                                             ], dim=-1).detach().cpu().numpy()
             
-            robot_pos = obs["robot_r1"]["proprio"][0:3]
-            robot_ori = obs["robot_r1"]["proprio"][3:6]
-            self.robot_world = self.convert_transformation_matrix(robot_pos, robot_ori).detach().cpu().numpy()
+
+            main_frames.append(obs['robot_r1']['robot_r1:zed_link:Camera:0']['rgb'][..., :3].detach().cpu().numpy())
+            left_frames.append(obs['robot_r1']['robot_r1:left_realsense_link:Camera:0']['rgb'][..., :3].detach().cpu().numpy())
+            right_frames.append(obs['robot_r1']['robot_r1:right_realsense_link:Camera:0']['rgb'][..., :3].detach().cpu().numpy())
+            
+            # robot_pos = obs["robot_r1"]["proprio"][140:143]
+            # robot_ori = th.cat([th.zeros(2), obs["robot_r1"]["proprio"][149:150]], dim=-1)
+            # self.robot_world = self.convert_transformation_matrix(robot_pos, robot_ori).detach().cpu().numpy()
+            # print(self.robot_world)
+            # self.handle_robot = np.linalg.inv(self.robot_world) @ self.handle_world
+            # self.handle_robot_pos = self.handle_robot[0:3,3]
+            # self.handle_robot_quat = T_np.mat2quat(self.handle_robot[0:3,0:3])
             # self.robot_eef_left_pos = obs["robot_r1"]["proprio"][186:189].detach().cpu().numpy()
             # self.robot_eef_left_quat = obs["robot_r1"]["proprio"][189:193].detach().cpu().numpy()
+            # self.robot_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
+            # self.robot_eef_right_quat = obs["robot_r1"]["proprio"][228:232].detach().cpu().numpy()
             self.robot_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
-            self.robot_eef_right_quat = obs["robot_r1"]["proprio"][228:232].detach().cpu().numpy()
+            print(np.linalg.norm(self.robot_eef_right_pos - self.handle_robot_pos))
+            step += 1
 
-
+        return main_frames, left_frames, right_frames
+    
     def step(self, action):
         obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
 
@@ -1463,22 +1488,20 @@ class GraspTaskEnv(TaskEnv):
         self._env.robots[0].reset()
         obs, _ = self._env.reset()
         self.load_task_instance()
-        robot_pos = obs["robot_r1"]["proprio"][0:3]
-        robot_ori = obs["robot_r1"]["proprio"][3:6]
-        self.robot_world = self.convert_transformation_matrix(robot_pos, robot_ori).detach().cpu().numpy()
-        # self.robot_eef_left_pos = obs["robot_r1"]["proprio"][186:189].detach().cpu().numpy()
-        # self.robot_eef_left_quat = obs["robot_r1"]["proprio"][189:193].detach().cpu().numpy()
-        self.robot_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
-        self.robot_eef_right_quat = obs["robot_r1"]["proprio"][228:232].detach().cpu().numpy()
+        robot_pos, robot_quat = self._env.robots[0].get_position_orientation()
+        self.robot_world = T_np.pose2mat((robot_pos.detach().cpu().numpy(), robot_quat.detach().cpu().numpy()))
+        self.robot_init_eef_left_pos = obs["robot_r1"]["proprio"][186:189].detach().cpu().numpy()
+        self.robot_init_eef_left_quat = obs["robot_r1"]["proprio"][189:193].detach().cpu().numpy()
+        self.robot_init_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
+        self.robot_init_eef_right_quat = obs["robot_r1"]["proprio"][228:232].detach().cpu().numpy()
 
         self.current_upper_joint = torch.cat([obs["robot_r1"]["proprio"][236:240],
                                           obs["robot_r1"]["proprio"][158:165],
                                           obs["robot_r1"]["proprio"][197:204],
                                            ], dim=-1).detach().cpu().numpy()
-        self.init_upper_joint = torch.cat([obs["robot_r1"]["proprio"][236:240],
-                                          obs["robot_r1"]["proprio"][158:165],
-                                          obs["robot_r1"]["proprio"][197:204],
-                                           ], dim=-1).detach().cpu().numpy()
+        self.init_upper_joint = self.current_upper_joint.copy()
+        self.left_arm_body_joint = self.current_upper_joint[:11]
+        self.right_arm_body_joint = np.concatenate([self.current_upper_joint[:4], self.current_upper_joint[-7:]], axis=-1)
 
         if self.task_combo is not None:
             self.task_combo.reset(self._env)
@@ -1486,12 +1509,12 @@ class GraspTaskEnv(TaskEnv):
 
         return obs
     
-    def convert_transformation_matrix(self, pos, ori):
-        rotmat = T.euler2mat(ori)
-        transform = th.eye(4)
-        transform[0:3,0:3] = rotmat
-        transform[0:3,3] = pos
-        return transform
+    def plan_trajectory(self, start_pos, start_quat, goal_pos, goal_quat, step):
+        frac = step / self.steps
+        target_pos = start_pos * (1 - frac) + goal_pos * frac
+        target_ori = T_np.quat_slerp(start_quat, goal_quat, frac)
+        return target_pos, target_ori
+    
 
 class TaskEnvRepeatWrapper(TaskEnv):
     def __init__(
