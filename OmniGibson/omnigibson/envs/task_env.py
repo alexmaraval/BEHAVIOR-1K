@@ -852,6 +852,7 @@ class TaskEnv:
         orientation = [1.2957e-04, -9.1167e-04, 7.3287e-01, -6.8037e-01]
 
         self._robot.set_position_orientation([x, y, z], orientation)
+        # Keeps the fridge door open
         set_door_angle_deg(env=self._env, obj_name=name_fridge, deg=random.randint(75, 90))
         randomize_tray_and_bacon(env=self._env)
 
