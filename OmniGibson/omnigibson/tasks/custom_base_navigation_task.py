@@ -275,9 +275,9 @@ class BaseNavigationTask(BaseTask):
     @classproperty
     def default_reward_config(cls):
         return {
-            "r_potential": 1.0,
+            "r_potential": 10.0,
             "r_collision": 10.0,
             "r_pointgoal": 10.0,
             "r_orientation": 10.0,
-            "r_stand_upright": 5e-3,
+            "r_stand_upright": 1e-2,
         }

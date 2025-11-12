@@ -115,13 +115,6 @@ class _PredicateToggleTask(BaseTask):
     def reset(self, env):
         super().reset(env)
 
-    def _get_state(self, obj):
-        if self._pred == "on" and ToggledOn in obj.states:
-            return obj.states[ToggledOn].get_value()
-        if self._pred == "open" and Open in obj.states:
-            return obj.states[Open].get_value()
-        return None
-
     def step(self, env, action):
         return super().step(env, action)
 
@@ -180,7 +173,7 @@ class _RelativeSatisfied(SuccessCondition):
             return a.states[Inside].get_value(b)
         if self._pred == "on_top" and OnTop in a.states:
             return a.states[OnTop].get_value(b)
-        if self._pred == "attached_to" and OnTop in a.states:
+        if self._pred == "attached_to" and AttachedTo in a.states:
             return a.states[AttachedTo].get_value(b)
         return None
 
@@ -228,7 +221,7 @@ class _RelativeStatusTask(BaseTask):
             robot_idn=self._robot_idn, fall_height=self._termination_config["fall_height"]
         )
         terminations["object_falling"] = ObjectFalling(
-            obj_name=self._source_object_name,
+            obj_name=[self._source_object_name, self._target_object_name],
             fall_height=self._termination_config["fall_height"],
         )
         terminations["predicate"] = _RelativeSatisfied(
@@ -270,18 +263,6 @@ class _RelativeStatusTask(BaseTask):
     def reset(self, env):
         super().reset(env)
 
-    def _get_state(self, a, b):
-        if self._pred == "next_to" and NextTo in a.states:
-            return a.states[NextTo].get_value(b)
-        if self._pred == "inside" and Inside in a.states:
-            return b.states[Inside].get_value(a)
-        if self._pred == "on_top" and OnTop in a.states:
-            return a.states[OnTop].get_value(b)
-        if self._pred == "attached_to" and OnTop in a.states:
-            return a.states[AttachedTo].get_value(b)
-
-        return None
-
     def step(self, env, action):
         reward, done, info = super().step(env, action)
         if self._require_release:
@@ -294,7 +275,6 @@ class _RelativeStatusTask(BaseTask):
             else:
                 info["done"]["success"] = False
                 return reward, False, info
-
         return reward, done, info
 
     @classproperty

@@ -211,4 +211,4 @@ class RobustGraspTask(BaseTask):
 
     @classproperty
     def default_reward_config(cls):
-        return {"dist_coeff": 10.0, "r_grasp": 10.0, "ori_coeff": 5.0, "r_stand_upright": 5e-3}
+        return {"dist_coeff": 10.0, "r_grasp": 10.0, "ori_coeff": 5.0, "r_stand_upright": 1e-2}
