@@ -34,7 +34,7 @@ from omnigibson.learning.utils.obs_utils import (
 from omnigibson.macros import gm
 from omnigibson.robots import BaseRobot
 from omnigibson.tasks.task_factory import get_sub_tasks
-from omnigibson.tasks.task_utils import set_door_angle_deg
+from omnigibson.tasks.task_utils import set_door_angle_deg, randomize_tray_and_bacon
 from omnigibson.utils.asset_utils import get_task_instance_path
 from omnigibson.utils.python_utils import recursively_convert_to_torch
 from rich.table import Table
@@ -411,6 +411,7 @@ class TaskEnv:
         self._env.robots[0].reset()
         obs, info = self._env.reset()
         self.load_task_instance()
+        # Temporary for cook_bacon task to start it in front of fridge and keep fridge opned
         self.open_fridge_randomise()
 
         self.frames = None
@@ -841,18 +842,18 @@ class TaskEnv:
 
     def open_fridge_randomise(self):
         from omnigibson.tasks.task_factory import name_fridge
+        # Fixed robot position in front tof the fridge
         # self._robot.set_position_orientation([8.1689e+00, -8.0334e-01, 5.0101e-03],
         #                                      [1.2957e-04, -9.1167e-04, 7.3287e-01, -6.8037e-01])
-        x = random.uniform(8, 9)
-        y = random.uniform(-7, -8.5)
+        # Ranbdom robot position in front of the fridge
+        x = random.uniform(8.0, 8.5)
+        y = random.uniform(-0.8, -0.85)
         z = 5.0101e-03
         orientation = [1.2957e-04, -9.1167e-04, 7.3287e-01, -6.8037e-01]
 
         self._robot.set_position_orientation([x, y, z], orientation)
         set_door_angle_deg(env=self._env, obj_name=name_fridge, deg=random.randint(75, 90))
-        # pos = th.tensor([7.7494, -1.8819, 0.7802], dtype=th.float32)
-        # quat = th.tensor([-7.9652e-05, -3.5517e-04, 6.3861e-02, 9.9796e-01], dtype=th.float32)
-        # self._env.scene.object_registry("name", "tray_208").set_position_orientation(position=pos, orientation=quat)
+        randomize_tray_and_bacon(env=self._env)
 
         for _ in range(25):
             og.sim.step_physics()

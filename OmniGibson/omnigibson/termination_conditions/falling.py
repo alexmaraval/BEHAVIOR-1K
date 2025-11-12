@@ -71,7 +71,7 @@ class ObjectFalling(FailureCondition):
         only_when_supported: bool = True,
         ignore_when_grasped: bool = True,
     ):
-        self._obj_name = obj_name
+        self._obj_names = obj_name if type(obj_name) is list else [obj_name]
         self._fall_height = fall_height
         self._topple = topple
         self._tilt_tolerance = tilt_tolerance
@@ -82,51 +82,49 @@ class ObjectFalling(FailureCondition):
         super().__init__()
 
     def _step(self, task, env, action):
-        obj = env.scene.object_registry("name", self._obj_name)
-        if obj is None:
-            # If object is not found, do not trigger termination here
-            return False
+        for obj_name in self._obj_names:
+            obj = env.scene.object_registry("name", obj_name)
+            if obj is None:
+                continue
 
-        # Terminate if the specified object is falling out of the scene
-        obj_z = obj.get_position_orientation()[0][2]
-        if obj_z < (env.scene.get_floor_height() - self._fall_height):
-            return True
+            # Terminate if the specified object is falling out of the scene
+            obj_z = obj.get_position_orientation()[0][2]
+            if obj_z < (env.scene.get_floor_height() - self._fall_height):
+                return True
 
-        # Terminate if the object has toppled (not upright)
-        if self._topple:
-            # Skip if object is still grasped / attached to robot
-            if self._ignore_when_grasped:
-                for robot in env.scene.robots:
-                    if (IsGrasping in robot.states and robot.states[IsGrasping].get_value(obj)) or (
-                        AttachedTo in obj.states and obj.states[AttachedTo].get_value(robot)
-                    ):
-                        # Reset counter while grasped
-                        self._violation_steps = 0
-                        return False
+            # Terminate if the object has toppled (not upright)
+            if self._topple:
+                # Skip if object is still grasped / attached to robot
+                if self._ignore_when_grasped:
+                    for robot in env.scene.robots:
+                        if (IsGrasping in robot.states and robot.states[IsGrasping].get_value(obj)) or (
+                                AttachedTo in obj.states and obj.states[AttachedTo].get_value(robot)
+                        ):
+                            # Reset counter while grasped
+                            self._violation_steps = 0
+                            continue
 
+                # Check support if requested (object is resting on a surface)
+                is_supported = True
+                if self._only_when_supported:
+                    is_supported = False
+                    for other in env.scene.objects:
+                        if other in env.scene.robots:
+                            continue
+                        if OnTop in obj.states and obj.states[OnTop].get_value(other):
+                            is_supported = True
+                            break
 
-            # Check support if requested (object is resting on a surface)
-            is_supported = True
-            if self._only_when_supported:
-                is_supported = False
-                for other in env.scene.objects:
-                    if other in env.scene.robots:
-                        continue
-                    if OnTop in obj.states and obj.states[OnTop].get_value(other):
-                        is_supported = True
-                        break
+                # Compute object "up" vector in world; compare with world +Z
+                obj_up = T.quat_apply(obj.get_position_orientation()[1], th.tensor([0, 0, 1], dtype=th.float32))
+                toppled = obj_up[2] < self._tilt_tolerance
 
-
-            # Compute object "up" vector in world; compare with world +Z
-            obj_up = T.quat_apply(obj.get_position_orientation()[1], th.tensor([0, 0, 1], dtype=th.float32))
-            toppled = obj_up[2] < self._tilt_tolerance
-
-            if toppled and is_supported:
-                self._violation_steps += 1
-                if self._violation_steps >= self._sustain_steps:
-                    return True
-                return False
-            else:
-                self._violation_steps = 0
+                if toppled and is_supported:
+                    self._violation_steps += 1
+                    if self._violation_steps >= self._sustain_steps:
+                        return True
+                    continue
+                else:
+                    self._violation_steps = 0
 
         return False
