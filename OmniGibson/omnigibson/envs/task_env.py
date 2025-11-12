@@ -53,7 +53,8 @@ from dreamer_training_utils import (
     reward_arm_vel_change_regularization
 )
 from b1k.diffik import WholeBodyDifferentialIK
-from b1k.ik import DualArmIKController
+from b1k.ik import DualArmIKController, GlobalSingleArmIK
+from b1k.planner.single_arm import SingleArmAndTorsoPlanner
 
 gm.ENABLE_FLATCACHE = True
 gm.USE_GPU_DYNAMICS = False
@@ -1333,7 +1334,7 @@ def make_table(stage_states):
 
     return table
 
-class GraspTaskEnv(TaskEnv):
+class GraspTaskEnv_DUAL(TaskEnv):
     def __init__(
             self,
             config: dict[str, ...],
@@ -1355,7 +1356,7 @@ class GraspTaskEnv(TaskEnv):
         self.handle_pos_world = np.array([8.0532, -1.5882, 1.0935])
         self.handle_quat_world = np.array([-0.4596, -0.5637, 0.5215, -0.4462])
         self.handle_world = T_np.pose2mat((self.handle_pos_world, self.handle_quat_world))
-        self.handle_robot = np.linalg.inv(self.robot_world) @ self.handle_world
+        self.handle_robot = np.linalg.inv(self.robot_world) @ self.handle_world ### this is not correct
         self.handle_robot_pos = self.handle_robot[0:3,3]
         self.handle_robot_quat = T_np.mat2quat(self.handle_robot[0:3,0:3])
 
@@ -1516,6 +1517,190 @@ class GraspTaskEnv(TaskEnv):
         return target_pos, target_ori
     
 
+
+class GraspTaskEnv_SINGLE(TaskEnv):
+    def __init__(
+            self,
+            config: dict[str, ...],
+            motor_type: str = "position",
+            instance_id: int | None = None,
+            max_steps: int | None = None,
+            use_domain_randomization: bool = False,
+            subtask_index: int | None = 1,
+            side: str = "right",
+            T: int = 100  ## T is steps
+    ):
+        super().__init__(
+            config=config,
+            motor_type=motor_type,
+            instance_id=instance_id,
+            max_steps=max_steps,
+            use_domain_randomization=use_domain_randomization,
+            subtask_index=subtask_index
+        )
+        
+        # handle_pos_world = np.array([8.0532, -1.5882, 1.0935])
+        # handle_quat_world = np.array([-0.4596, -0.5637, 0.5215, -0.4462])
+        # self.handle_world = T_np.pose2mat((self.handle_pos_world, self.handle_quat_world))
+        # self.handle_robot = np.linalg.inv(self.robot_world) @ self.handle_world
+        # self.handle_robot_pos = self.handle_robot[0:3,3]
+        # self.handle_robot_quat = T_np.mat2quat(self.handle_robot[0:3,0:3])
+
+        self.T = T ## T is step
+        self.planner = SingleArmAndTorsoPlanner(side, T)
+        self.ik = GlobalSingleArmIK(side, joint_limit_safety=0.99)
+
+
+    def get_handle_in_robot_frame(self, handle_pos_world, handle_quat_world):
+        handle_world = T_np.pose2mat((handle_pos_world, handle_quat_world))
+        handle_robot = T_np.pose_inv(self.robot_world) @ handle_world
+        handle_pos_robot = handle_robot[0:3,3]
+        handle_quat_robot = T_np.mat2quat(handle_robot[0:3,0:3])
+        breakpoint()
+        return handle_pos_robot, handle_quat_robot
+
+    def load_task_instance(self):
+        scene_model = self._env.task.scene_name
+        # tro_filename = self._env.task.get_cached_activity_scene_filename(
+        #     scene_model=scene_model,
+        #     activity_name=self._env.task.activity_name,
+        #     activity_definition_id=self._env.task.activity_definition_id,
+        #     activity_instance_id=self.instance_id,
+        # )
+        tro_file_path = os.path.join(
+            get_task_instance_path(scene_model),
+            f"json/{scene_model}_task_{self._env.task.activity_name}_instances/grasp_fridge_handle_subtask.json",
+        )
+
+        if self.use_domain_randomization:
+            scene_data = self.randomize_scene_instances(Path(tro_file_path).parent)
+        else:
+            with open(tro_file_path, "r") as f:
+                scene_data = json.load(f)
+
+        tro_state = recursively_convert_to_torch(scene_data)
+        for tro_key, state_data in tro_state.items():
+            if tro_key == "robot_poses":
+                presampled_robot_poses = state_data
+                robot_pos = presampled_robot_poses[self._robot.model_name][0]["position"]
+                robot_quat = presampled_robot_poses[self._robot.model_name][0]["orientation"]
+                self._robot.set_position_orientation(robot_pos, robot_quat)
+                # Write robot poses to scene metadata
+                self._env.scene.write_task_metadata(key=tro_key, data=state_data)
+            else:
+                self._env.task.object_scope[tro_key].load_state(state_data, serialized=False)
+
+        # Try to ensure that all task-relevant objects are stable
+        # They should already be stable from the sampled instance, but there is some issue where loading the state
+        # causes some jitter (maybe for small mass / thin objects?)
+        for _ in range(25):
+            og.sim.step_physics()
+            for entity in self._env.task.object_scope.values():
+                if not entity.is_system and entity.exists:
+                    entity.keep_still()
+
+        self._env.scene.update_initial_file()
+        self._env.scene.reset()
+
+    
+    def solve_IK(self, handle_pos_robot, handle_quat_robot):
+        ## read from demonstrationd)
+        breakpoint()
+        config = {
+            "q0": self.init_upper_joint,
+            "pG": handle_pos_robot,
+            "rG": handle_quat_robot,
+            "p_err_max": 0.01,  # [m]
+            "r_err_max": math.radians(0.1),
+            "maintain_gaze": 1000.0,
+        }
+
+        self.ik.reset(config)
+        if self.ik.solve():
+            print("IK solved!")
+        else:
+            print(">>Failed to solve IK<<")
+            sys.exit(0)
+
+        
+        q_target_dict = self.ik.get_solution()
+        q_target = np.array([q_target_dict[n] for n in self.planner.joint_names])
+        
+        return q_target
+
+    def plan_trajectory(self, q_start, q_target, duration):
+        time = np.linspace(0, duration, T)
+        Q0 = np.linspace(q_start, q_target, T)
+        dQ0 = np.gradient(Q0, time, axis=0)
+        ddQ0 = np.gradient(dQ0, time, axis=0)
+
+        config = {
+            # Initial guess
+            # "Q0": np.zeros((planner.serial_chain.dof, T)),
+            # "dQ0": np.zeros((planner.serial_chain.dof, T)),
+            # "ddQ0": np.zeros((planner.serial_chain.dof, T)),
+            "Q0": Q0,
+            "dQ0": dQ0,
+            "ddQ0": ddQ0,
+            # Parameters
+            "duration": duration,
+            "q0": q_start,
+            "qF": q_target,
+            "w_dQ": 0.01,
+            "w_ddQ": 1.0,
+        }
+
+        self.planner.reset(config)
+        success = self.planner.solve()
+        if success:
+            print("solver succeeded!")
+        else:
+            print("solver failed")
+            sys.exit(0)
+
+        qsol = self.planner.get_solution()
+
+        return qsol
+    
+    def get_planner_solution(self, handle_pos_world, handle_quat_world, duration):
+        handle_pos_robot, handle_quat_robot = self.get_handle_in_robot_frame(handle_pos_world, handle_quat_world)
+        q_target = self.solve_IK(handle_pos_robot, handle_quat_robot)
+        qsol = self.plan_trajectory(self.init_upper_joint, q_target, duration)
+        breakpoint()
+        return qsol
+    
+    def step(self, action):
+        obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
+
+        return obs, reward_env, terminated_env, truncated_env, info_env
+        
+
+    def reset(self):
+        self._env.robots[0].reset()
+        obs, _ = self._env.reset()
+        self.load_task_instance()
+        robot_pos, robot_quat = self._env.robots[0].get_position_orientation() ## it should be replaced by slam
+        self.robot_world = T_np.pose2mat((robot_pos.detach().cpu().numpy(), robot_quat.detach().cpu().numpy()))
+        self.robot_init_eef_left_pos = obs["robot_r1"]["proprio"][186:189].detach().cpu().numpy()
+        self.robot_init_eef_left_quat = obs["robot_r1"]["proprio"][189:193].detach().cpu().numpy()
+        self.robot_init_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
+        self.robot_init_eef_right_quat = obs["robot_r1"]["proprio"][228:232].detach().cpu().numpy()
+        
+
+        ## only keep the torso and right arm joints
+        self.current_upper_joint_right = torch.cat([obs["robot_r1"]["proprio"][236:240],
+                                          obs["robot_r1"]["proprio"][197:204],
+                                           ], dim=-1).detach().cpu().numpy()
+        self.init_upper_joint = self.current_upper_joint_right.copy()
+
+        if self.task_combo is not None:
+            self.task_combo.reset(self._env)
+        self._reset_subtask_progress()
+
+        return obs
+    
+    
+    
 class TaskEnvRepeatWrapper(TaskEnv):
     def __init__(
             self,
