@@ -5,6 +5,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from tqdm import tqdm
 
 import cv2
 import math
@@ -1556,7 +1557,7 @@ class GraspTaskEnv_SINGLE(TaskEnv):
         handle_robot = T_np.pose_inv(self.robot_world) @ handle_world
         handle_pos_robot = handle_robot[0:3,3]
         handle_quat_robot = T_np.mat2quat(handle_robot[0:3,0:3])
-        breakpoint()
+
         return handle_pos_robot, handle_quat_robot
 
     def load_task_instance(self):
@@ -1605,75 +1606,93 @@ class GraspTaskEnv_SINGLE(TaskEnv):
     
     def solve_IK(self, handle_pos_robot, handle_quat_robot):
         ## read from demonstrationd)
-        breakpoint()
-        config = {
-            "q0": self.init_upper_joint,
-            "pG": handle_pos_robot,
-            "rG": handle_quat_robot,
-            "p_err_max": 0.01,  # [m]
-            "r_err_max": math.radians(0.1),
-            "maintain_gaze": 1000.0,
-        }
+        for i in tqdm(range(1, self.T + 1)):
+            target_pos, target_quat = self.plan_trajectory(self.robot_init_eef_right_pos, self.robot_init_eef_right_quat, handle_pos_robot, handle_quat_robot, i)
+            config = {
+                "q0": self.current_upper_joint_right,
+                "pG": target_pos,
+                "rG": target_quat,
+                "p_err_max": 0.01,  # [m]
+                "r_err_max": math.radians(0.1),
+                "maintain_gaze": 1000.0,
+            }
 
-        self.ik.reset(config)
-        if self.ik.solve():
-            print("IK solved!")
-        else:
-            print(">>Failed to solve IK<<")
-            sys.exit(0)
+            self.ik.reset(config)
+            if self.ik.solve():
+                print("IK solved!")
+            else:
+                print(">>Failed to solve IK<<")
+                sys.exit(0)
 
-        
-        q_target_dict = self.ik.get_solution()
-        q_target = np.array([q_target_dict[n] for n in self.planner.joint_names])
-        
-        return q_target
+            
+            q_target_dict = self.ik.get_solution()
+            q_target = th.tensor([q_target_dict[n] for n in self.planner.joint_names])
 
-    def plan_trajectory(self, q_start, q_target, duration):
-        time = np.linspace(0, duration, T)
-        Q0 = np.linspace(q_start, q_target, T)
-        dQ0 = np.gradient(Q0, time, axis=0)
-        ddQ0 = np.gradient(dQ0, time, axis=0)
+            action = torch.from_numpy(np.concatenate([np.zeros(3),
+                                q_target[:4],
+                                self.robot_init_left_arm_joint,
+                                np.ones(1),
+                                q_target[4:],
+                                np.ones(1)], axis=-1))
+    
+            obs, _, _, _, _ = self.step(action)
+            self.current_upper_joint_right = torch.cat([obs["robot_r1"]["proprio"][236:240],
+                                          obs["robot_r1"]["proprio"][197:204],
+                                           ], dim=-1).detach().cpu().numpy()
+            
 
-        config = {
-            # Initial guess
-            # "Q0": np.zeros((planner.serial_chain.dof, T)),
-            # "dQ0": np.zeros((planner.serial_chain.dof, T)),
-            # "ddQ0": np.zeros((planner.serial_chain.dof, T)),
-            "Q0": Q0,
-            "dQ0": dQ0,
-            "ddQ0": ddQ0,
-            # Parameters
-            "duration": duration,
-            "q0": q_start,
-            "qF": q_target,
-            "w_dQ": 0.01,
-            "w_ddQ": 1.0,
-        }
+    def plan_trajectory(self, start_pos, start_quat, goal_pos, goal_quat, step):
+        frac = step / self.T
+        target_pos = start_pos * (1 - frac) + goal_pos * frac
+        target_quat = T_np.quat_slerp(start_quat, goal_quat, frac)
+        return target_pos, target_quat
+    
+    # def plan_trajectory(self, q_start, q_target, duration):
+    #     time = np.linspace(0, duration, T)
+    #     Q0 = np.linspace(q_start, q_target, T)
+    #     dQ0 = np.gradient(Q0, time, axis=0)
+    #     ddQ0 = np.gradient(dQ0, time, axis=0)
 
-        self.planner.reset(config)
-        success = self.planner.solve()
-        if success:
-            print("solver succeeded!")
-        else:
-            print("solver failed")
-            sys.exit(0)
+    #     config = {
+    #         # Initial guess
+    #         # "Q0": np.zeros((planner.serial_chain.dof, T)),
+    #         # "dQ0": np.zeros((planner.serial_chain.dof, T)),
+    #         # "ddQ0": np.zeros((planner.serial_chain.dof, T)),
+    #         "Q0": Q0,
+    #         "dQ0": dQ0,
+    #         "ddQ0": ddQ0,
+    #         # Parameters
+    #         "duration": duration,
+    #         "q0": q_start,
+    #         "qF": q_target,
+    #         "w_dQ": 0.01,
+    #         "w_ddQ": 1.0,
+    #     }
 
-        qsol = self.planner.get_solution()
+    #     self.planner.reset(config)
+    #     success = self.planner.solve()
+    #     if success:
+    #         print("solver succeeded!")
+    #     else:
+    #         print("solver failed")
+    #         sys.exit(0)
 
-        return qsol
+    #     qsol = self.planner.get_solution()
+
+    #     return qsol
     
     def get_planner_solution(self, handle_pos_world, handle_quat_world, duration):
         handle_pos_robot, handle_quat_robot = self.get_handle_in_robot_frame(handle_pos_world, handle_quat_world)
-        q_target = self.solve_IK(handle_pos_robot, handle_quat_robot)
-        qsol = self.plan_trajectory(self.init_upper_joint, q_target, duration)
-        breakpoint()
-        return qsol
+        self.solve_IK(handle_pos_robot, handle_quat_robot)
+        # qsol = self.plan_trajectory(self.init_upper_joint, q_target, duration)
+        # breakpoint()
+        return 
     
     def step(self, action):
         obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
 
         return obs, reward_env, terminated_env, truncated_env, info_env
-        
+    
 
     def reset(self):
         self._env.robots[0].reset()
@@ -1685,7 +1704,7 @@ class GraspTaskEnv_SINGLE(TaskEnv):
         self.robot_init_eef_left_quat = obs["robot_r1"]["proprio"][189:193].detach().cpu().numpy()
         self.robot_init_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
         self.robot_init_eef_right_quat = obs["robot_r1"]["proprio"][228:232].detach().cpu().numpy()
-        
+        self.robot_init_left_arm_joint = obs["robot_r1"]["proprio"][158:165].detach().cpu().numpy()
 
         ## only keep the torso and right arm joints
         self.current_upper_joint_right = torch.cat([obs["robot_r1"]["proprio"][236:240],
