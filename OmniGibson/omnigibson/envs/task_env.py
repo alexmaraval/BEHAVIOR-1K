@@ -865,6 +865,10 @@ class TaskEnv:
 
         return scene_data
 
+    def move_to_face_fridge(self):
+        self._robot.set_position_orientation([8.1689e+00, -8.0334e-01, 5.0101e-03],
+                                             [1.2957e-04, -9.1167e-04, 7.3287e-01, -6.8037e-01])
+
     def open_fridge_randomise(self):
         from omnigibson.tasks.task_factory import name_fridge
         # Fixed robot position in front tof the fridge
