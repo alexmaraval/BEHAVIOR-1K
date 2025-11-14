@@ -9,9 +9,9 @@ class StandUprightReward(BaseRewardFunction):
         self.coeff = float(coeff)
         super().__init__()
 
-    def _step(self, task, env, action):
+    def _step(self, task, env, action, **kwargs):
         current_joint_state = env.robots[self._robot_idn].states[Joint].get_value()
-        original_joint_state = torch.zeros(28) * torch.pi / 180
+        original_joint_state = kwargs["reset_joint_state"]
         torso_diff = (current_joint_state - original_joint_state)[6:10].norm()
         r = (1 + torch.tanh(-torso_diff)) * self.coeff
         return float(r.item()), {"upright": float(r.item())}

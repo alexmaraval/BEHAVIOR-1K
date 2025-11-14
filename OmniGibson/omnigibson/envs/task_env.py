@@ -39,6 +39,7 @@ from omnigibson.tasks.task_utils import set_door_angle_deg, randomize_tray_and_b
 from omnigibson.utils.asset_utils import get_task_instance_path
 from omnigibson.utils.python_utils import recursively_convert_to_torch
 from rich.table import Table
+from omnigibson.object_states import Pose, Joint
 
 # sys.path.insert(0, "BEHAVIOR-1K/OmniGibson")
 
@@ -431,7 +432,7 @@ class TaskEnv:
             self.open_fridge_randomise()
         elif self.task_name == 'cook_bacon' and self.subtask_index == 4:
             self.move_to_face_fridge()
-
+        self._env._reset_joint_state = self._env.env.robots[0].states[Joint].get_value().clone()
         self.frames = None
 
         print("*" * 100, flush=True)
@@ -1235,31 +1236,16 @@ if __name__ == "__main__":
                 base_pos = obs["robot_r1::proprio"][140:142]
                 yaw2d = obs["robot_r1::proprio"][149]
                 action = th.from_numpy(get_transformed_action(row, base_pos, yaw2d))
-                # breakpoint()
-
-                # action, hold_action_var, hold_action_mask = overwrite_action_with_hold(
-                #     action, hold_action_var, hold_action_mask
-                # )
 
                 obs, reward_env, terminated_env, truncated_env, info = env.step(action)
                 sub_task_info = info["subtask"]
                 idx = sub_task_info["index"]
                 next_idx = idx + 1
                 has_next_stage = next_idx < len(stage_states)
-                # if idx ==1:
-                #     i +=1
-                #     if i >= 300:
-                #         breakpoint()
-                #         env._robot.get_position_orientation()
-                #         env._robot.get_eef_position()
-                #         env._robot.get_eef_orientation()
-                #         env._env.scene.object_registry("name", "tray_208").get_position_orientation()
 
                 # Update stage info
                 if sub_task_info["done"]:
                     print(f"steps count : {i}")
-                    # if idx == 2:
-                    #     breakpoint()
                     stage_states[idx]["status"] = "completed"
 
                     # Move to the next stage
