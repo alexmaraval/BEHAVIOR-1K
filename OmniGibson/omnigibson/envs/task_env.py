@@ -1344,7 +1344,8 @@ class GraspTaskEnv_DUAL(TaskEnv):
             max_steps: int | None = None,
             use_domain_randomization: bool = False,
             subtask_index: int | None = 1,
-            t: float = 1/120
+            t: float = 1/120,
+            time: float = 10,
     ):
         super().__init__(
             config=config,
@@ -1354,28 +1355,23 @@ class GraspTaskEnv_DUAL(TaskEnv):
             use_domain_randomization=use_domain_randomization,
             subtask_index=subtask_index
         )
-        self.handle_pos_world = np.array([8.0532, -1.5882, 1.0935])
-        self.handle_quat_world = np.array([-0.4596, -0.5637, 0.5215, -0.4462])
-        self.handle_world = T_np.pose2mat((self.handle_pos_world, self.handle_quat_world))
-        self.handle_robot = np.linalg.inv(self.robot_world) @ self.handle_world ### this is not correct
-        self.handle_robot_pos = self.handle_robot[0:3,3]
-        self.handle_robot_quat = T_np.mat2quat(self.handle_robot[0:3,0:3])
+        # self.handle_pos_world = np.array([8.0532, -1.5882, 1.0935])
+        # self.handle_quat_world = np.array([-0.4596, -0.5637, 0.5215, -0.4462])
+        # self.handle_world = T_np.pose2mat((self.handle_pos_world, self.handle_quat_world))
+        # self.handle_robot = np.linalg.inv(self.robot_world) @ self.handle_world 
+        # self.handle_robot_pos = self.handle_robot[0:3,3]
+        # self.handle_robot_quat = T_np.mat2quat(self.handle_robot[0:3,0:3])
 
         self.t = t
-        self.steps = 5 / t # 5 seconds to reach the target
+        self.steps = time / t # 10 seconds to reach the target
         self.dual_arm_solver = DualArmIKController(t)
-        forward_left = self.dual_arm_solver.left_arm_chain.forward_kinematics(self.left_arm_body_joint)._translation.as_vector()
-        forward_right = self.dual_arm_solver.right_arm_chain.forward_kinematics(self.right_arm_body_joint)._translation.as_vector()
-        breakpoint()
+        # forward_left = self.dual_arm_solver.left_arm_chain.forward_kinematics(self.left_arm_body_joint)._translation.as_vector()
+        # forward_right = self.dual_arm_solver.right_arm_chain.forward_kinematics(self.right_arm_body_joint)._translation.as_vector()
+        # breakpoint()
 
     def load_task_instance(self):
         scene_model = self._env.task.scene_name
-        # tro_filename = self._env.task.get_cached_activity_scene_filename(
-        #     scene_model=scene_model,
-        #     activity_name=self._env.task.activity_name,
-        #     activity_definition_id=self._env.task.activity_definition_id,
-        #     activity_instance_id=self.instance_id,
-        # )
+    
         tro_file_path = os.path.join(
             get_task_instance_path(scene_model),
             f"json/{scene_model}_task_{self._env.task.activity_name}_instances/grasp_fridge_handle_subtask.json",
@@ -1412,15 +1408,15 @@ class GraspTaskEnv_DUAL(TaskEnv):
         self._env.scene.reset()
 
     
-    def solve_IK(self):
+    def solve_IK(self, target_pos, target_quat):
         step = 0
         main_frames = []
         left_frames = []
         right_frames = []
-
-        while step < self.steps:
+        step = 0
+        while step <= self.steps:
             target_pos_right, target_quat_right = self.plan_trajectory(self.robot_init_eef_right_pos, self.robot_init_eef_right_quat,
-                                                                    self.handle_robot_pos, self.handle_robot_quat,
+                                                                    target_pos, target_quat,
                                                                     step)
             
             config = {
@@ -1431,7 +1427,7 @@ class GraspTaskEnv_DUAL(TaskEnv):
                 "w_dq": 0.01,
                 "w_p": 1e8,
                 "w_qn": 1e5,
-                "qn": self.init_upper_joint,
+                "qn": self.current_upper_joint,
                 "w_r": 1e8,
                 "w_gaze": 1e3,
                 "q": self.current_upper_joint
@@ -1474,8 +1470,8 @@ class GraspTaskEnv_DUAL(TaskEnv):
             # self.robot_eef_left_quat = obs["robot_r1"]["proprio"][189:193].detach().cpu().numpy()
             # self.robot_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
             # self.robot_eef_right_quat = obs["robot_r1"]["proprio"][228:232].detach().cpu().numpy()
-            self.robot_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
-            print(np.linalg.norm(self.robot_eef_right_pos - self.handle_robot_pos))
+            # self.robot_eef_right_pos = obs["robot_r1"]["proprio"][225:228].detach().cpu().numpy()
+            # print(np.linalg.norm(self.robot_eef_right_pos - self.handle_robot_pos))
             step += 1
 
         return main_frames, left_frames, right_frames
@@ -1517,6 +1513,14 @@ class GraspTaskEnv_DUAL(TaskEnv):
         target_ori = T_np.quat_slerp(start_quat, goal_quat, frac)
         return target_pos, target_ori
     
+    def get_handle_in_robot_frame(self, handle_pos_world, handle_quat_world):
+        handle_world = T_np.pose2mat((handle_pos_world, handle_quat_world))
+        handle_robot = T_np.pose_inv(self.robot_world) @ handle_world
+        handle_pos_robot = handle_robot[0:3,3]
+        handle_quat_robot = T_np.mat2quat(handle_robot[0:3,0:3])
+
+        return handle_pos_robot, handle_quat_robot
+
 
 
 class GraspTaskEnv_SINGLE(TaskEnv):
@@ -1529,7 +1533,9 @@ class GraspTaskEnv_SINGLE(TaskEnv):
             use_domain_randomization: bool = False,
             subtask_index: int | None = 1,
             side: str = "right",
-            T: int = 2000  ## T is steps
+            T: int = 200,  ## T is steps
+            duration: float = 10,
+            sub_traj_num: int = 1, ## interpolate into how many trajs
     ):
         super().__init__(
             config=config,
@@ -1548,7 +1554,11 @@ class GraspTaskEnv_SINGLE(TaskEnv):
         # self.handle_robot_quat = T_np.mat2quat(self.handle_robot[0:3,0:3])
 
         self.T = T ## T is step
-        self.planner = SingleArmAndTorsoPlanner(side, T)
+        self.duration = duration
+        self.sub_traj_num = sub_traj_num
+        self.sub_T = int(T / sub_traj_num)
+        self.sub_duration = duration / sub_traj_num
+        self.planner = SingleArmAndTorsoPlanner(side, self.sub_T)
         self.ik = GlobalSingleArmIK(side, joint_limit_safety=0.99)
 
 
@@ -1562,12 +1572,6 @@ class GraspTaskEnv_SINGLE(TaskEnv):
 
     def load_task_instance(self):
         scene_model = self._env.task.scene_name
-        # tro_filename = self._env.task.get_cached_activity_scene_filename(
-        #     scene_model=scene_model,
-        #     activity_name=self._env.task.activity_name,
-        #     activity_definition_id=self._env.task.activity_definition_id,
-        #     activity_instance_id=self.instance_id,
-        # )
         tro_file_path = os.path.join(
             get_task_instance_path(scene_model),
             f"json/{scene_model}_task_{self._env.task.activity_name}_instances/grasp_fridge_handle_subtask.json",
@@ -1604,90 +1608,139 @@ class GraspTaskEnv_SINGLE(TaskEnv):
         self._env.scene.reset()
 
     
-    def solve_IK(self, handle_pos_world, handle_quat_world):
-        ## read from demonstrationd)
-        for i in tqdm(range(1, self.T + 1)):
-            handle_pos_robot, handle_quat_robot = self.get_handle_in_robot_frame(handle_pos_world, handle_quat_world)
-            target_pos, target_quat = self.plan_trajectory(self.robot_init_eef_right_pos, self.robot_init_eef_right_quat, handle_pos_robot, handle_quat_robot, i)
-            config = {
-                "q0": self.current_upper_joint_right,
-                "pG": target_pos,
-                "rG": target_quat,
-                "p_err_max": 0.01,  # [m]
-                "r_err_max": math.radians(0.1),
-                "maintain_gaze": 1000.0,
-            }
-
-            self.ik.reset(config)
-            if self.ik.solve():
-                print("IK solved!")
-            else:
-                print(">>Failed to solve IK<<")
-                sys.exit(0)
-
-            
-            q_target_dict = self.ik.get_solution()
-            q_target = th.tensor([q_target_dict[n] for n in self.planner.joint_names])
-
-            self.action = torch.from_numpy(np.concatenate([np.zeros(3),
-                                q_target[:4],
-                                self.robot_init_left_arm_joint,
-                                np.ones(1),
-                                q_target[4:],
-                                np.ones(1)], axis=-1))
+    def solve_IK(self, current_joint, target_pos_robot, target_quat_robot):
+        ## world is read from demonstration
     
-            obs, _, _, _, _ = self.step(self.action)
-            self.current_upper_joint_right = torch.cat([obs["robot_r1"]["proprio"][236:240],
-                                          obs["robot_r1"]["proprio"][197:204],
-                                           ], dim=-1).detach().cpu().numpy()
+        config = {
+            "q0": current_joint,
+            "pG": target_pos_robot,
+            "rG": target_quat_robot,
+            "p_err_max": 0.005,  # [m]
+            "r_err_max": math.radians(0.05),
+            "maintain_gaze": 1000.0,
+        }
 
-    def plan_trajectory(self, start_pos, start_quat, goal_pos, goal_quat, step):
-        frac = step / self.T
+        self.ik.reset(config)
+        if self.ik.solve():
+            print("IK solved!")
+        else:
+            print(">>Failed to solve IK<<")
+            sys.exit(0)
+
+        q_target_dict = self.ik.get_solution()
+        q_target = np.array([q_target_dict[n] for n in self.planner.joint_names])
+
+        return q_target
+
+    
+    def plan_joint_trajectory(self, q_start, q_target, duration, steps):
+        time = np.linspace(0, duration, steps)
+        Q0 = np.linspace(q_start, q_target, steps)
+        dQ0 = np.gradient(Q0, time, axis=0)
+        ddQ0 = np.gradient(dQ0, time, axis=0)
+
+        config = {
+            # Initial guess
+            # "Q0": np.zeros((planner.serial_chain.dof, T)),
+            # "dQ0": np.zeros((planner.serial_chain.dof, T)),
+            # "ddQ0": np.zeros((planner.serial_chain.dof, T)),
+            "Q0": Q0,
+            "dQ0": dQ0,
+            "ddQ0": ddQ0,
+            # Parameters
+            "duration": duration,
+            "q0": q_start,
+            "qF": q_target,
+            "w_dQ": 0.01,
+            "w_ddQ": 1.0,
+        }
+
+        self.planner.reset(config)
+        success = self.planner.solve()
+        if success:
+            print("solver succeeded!")
+        else:
+            print("solver failed")
+            sys.exit(0)
+
+        qsol = self.planner.get_solution()
+
+        return qsol
+    
+
+    def get_grasp_planner_solution(self, handle_pos_robot, handle_quat_robot):
+        sub_qsol_list = []
+        # target_pos_middle = self.robot_init_eef_right_pos.copy()
+        # target_pos_middle[2] = handle_pos_robot[2]
+        # target_pos_list = [target_pos_middle, handle_pos_robot]
+        # target_quat_list = [self.robot_init_eef_right_quat, handle_quat_robot]
+        current_joint = self.init_upper_joint_right.copy()
+        for i in range(1, self.sub_traj_num+1):
+            print(f"i_th traj: {i}")
+            target_pos, target_quat = self.interpolate_trajectory(self.robot_init_eef_right_pos, self.robot_init_eef_right_quat,
+                                                                  handle_pos_robot, handle_quat_robot, step=i)
+            # target_pos = target_pos_list[i-1]
+            # target_quat = target_quat_list[i-1]
+            target_joint = self.solve_IK(current_joint, target_pos, target_quat)
+            sub_qsol = self.plan_joint_trajectory(current_joint, target_joint, self.sub_duration, self.sub_T)
+            sub_qsol_list.append(sub_qsol)
+            current_joint = target_joint
+        
+        return sub_qsol_list
+    
+
+    def grasp_the_door(self, handle_pos_robot, handle_quat_robot):
+        sub_qsol_list = self.get_grasp_planner_solution(handle_pos_robot, handle_quat_robot)
+        t = 0
+        last_action = None
+        main_frames = []
+        right_frames = []
+
+        while t <= self.duration:
+            action = torch.from_numpy(np.concatenate([np.zeros(3),
+                                                      self.init_upper_joint_right[:4],
+                                                      self.init_left_arm_joint,
+                                                      np.array([1]),
+                                                      self.init_upper_joint_right[4:11],
+                                                      np.array([1])], axis=-1))
+            obs, _, _, _, _ = self.step(action)
+            main_frames.append(obs['robot_r1']['robot_r1:zed_link:Camera:0']['rgb'][..., :3].detach().cpu().numpy())
+            # print(f"robot position and orientation: {self._env.robots[0].get_position_orientation()}")
+            print(f"torso: {obs['robot_r1']['proprio'][236:240]}")
+            t += 0.01
+        # while t <= self.duration + 2.0:
+        #     if t <= self.duration:
+        #         idx = int(t // self.sub_duration)
+        #         sub_t = t % self.sub_duration
+        #         q_move = [sub_qsol_list[idx][n](sub_t) for n in self.planner.joint_names]
+        #         action = torch.from_numpy(np.concatenate([np.zeros(3),
+        #                                                 np.array(q_move[:4]),
+        #                                                 self.init_left_arm_joint,
+        #                                                 np.array([1]),
+        #                                                 np.array(q_move[4:11]),
+        #                                                 np.array([1])], axis=-1))
+        #         obs, _, _, _, _ = self.step(action)
+        #         main_frames.append(obs['robot_r1']['robot_r1:zed_link:Camera:0']['rgb'][..., :3].detach().cpu().numpy())
+        #         right_frames.append(obs['robot_r1']['robot_r1:right_realsense_link:Camera:0']['rgb'][..., :3].detach().cpu().numpy())
+        #         last_action = action
+        #     else:
+        #         last_action[-1] = 0  # close the right gripper
+        #         obs, _, _, _, _ = self.step(last_action)
+        #         main_frames.append(obs['robot_r1']['robot_r1:zed_link:Camera:0']['rgb'][..., :3].detach().cpu().numpy())
+        #         right_frames.append(obs['robot_r1']['robot_r1:right_realsense_link:Camera:0']['rgb'][..., :3].detach().cpu().numpy())
+
+        #     print(f"robot position and orientation: {self._env.robots[0].get_position_orientation()}")
+        #     t += 0.01
+        #     print(t)
+        return main_frames, right_frames
+
+    
+    def interpolate_trajectory(self, start_pos, start_quat, goal_pos, goal_quat, step):
+        frac = step / self.sub_traj_num
         target_pos = start_pos * (1 - frac) + goal_pos * frac
         target_quat = T_np.quat_slerp(start_quat, goal_quat, frac)
         return target_pos, target_quat
-    
-    # def plan_trajectory(self, q_start, q_target, duration):
-    #     time = np.linspace(0, duration, T)
-    #     Q0 = np.linspace(q_start, q_target, T)
-    #     dQ0 = np.gradient(Q0, time, axis=0)
-    #     ddQ0 = np.gradient(dQ0, time, axis=0)
 
-    #     config = {
-    #         # Initial guess
-    #         # "Q0": np.zeros((planner.serial_chain.dof, T)),
-    #         # "dQ0": np.zeros((planner.serial_chain.dof, T)),
-    #         # "ddQ0": np.zeros((planner.serial_chain.dof, T)),
-    #         "Q0": Q0,
-    #         "dQ0": dQ0,
-    #         "ddQ0": ddQ0,
-    #         # Parameters
-    #         "duration": duration,
-    #         "q0": q_start,
-    #         "qF": q_target,
-    #         "w_dQ": 0.01,
-    #         "w_ddQ": 1.0,
-    #     }
-
-    #     self.planner.reset(config)
-    #     success = self.planner.solve()
-    #     if success:
-    #         print("solver succeeded!")
-    #     else:
-    #         print("solver failed")
-    #         sys.exit(0)
-
-    #     qsol = self.planner.get_solution()
-
-    #     return qsol
-    
-    # def get_planner_solution(self, handle_pos_world, handle_quat_world, duration):
-    #     handle_pos_robot, handle_quat_robot = self.get_handle_in_robot_frame(handle_pos_world, handle_quat_world)
-    #     self.solve_IK(handle_pos_robot, handle_quat_robot)
-    #     # qsol = self.plan_trajectory(self.init_upper_joint, q_target, duration)
-    #     # breakpoint()
-    #     return 
-    
     def step(self, action):
         obs, reward_env, terminated_env, truncated_env, info_env = self._env.step(action)
 
@@ -1699,6 +1752,7 @@ class GraspTaskEnv_SINGLE(TaskEnv):
         obs, _ = self._env.reset()
         self.load_task_instance()
         robot_pos, robot_quat = self._env.robots[0].get_position_orientation() ## it should be replaced by slam
+        print(f"initial robot position and orientation: {self._env.robots[0].get_position_orientation()}")
         self.robot_world = T_np.pose2mat((robot_pos.detach().cpu().numpy(), robot_quat.detach().cpu().numpy()))
         self.robot_init_eef_left_pos = obs["robot_r1"]["proprio"][186:189].detach().cpu().numpy()
         self.robot_init_eef_left_quat = obs["robot_r1"]["proprio"][189:193].detach().cpu().numpy()
@@ -1710,7 +1764,8 @@ class GraspTaskEnv_SINGLE(TaskEnv):
         self.current_upper_joint_right = torch.cat([obs["robot_r1"]["proprio"][236:240],
                                           obs["robot_r1"]["proprio"][197:204],
                                            ], dim=-1).detach().cpu().numpy()
-        self.init_upper_joint = self.current_upper_joint_right.copy()
+        self.init_upper_joint_right = self.current_upper_joint_right.copy()
+        self.init_left_arm_joint = obs["robot_r1"]["proprio"][158:165].detach().cpu().numpy()
 
         if self.task_combo is not None:
             self.task_combo.reset(self._env)

@@ -968,7 +968,7 @@ def relative_pose_transform(pos1, quat1, pos0, quat0):
     # Get poses
     mat0 = pose2mat((pos0, quat0))
     mat1 = pose2mat((pos1, quat1))
-
+    
     # Invert pose0 and calculate transform
     return mat2pose(pose_inv(mat0) @ mat1)
 
